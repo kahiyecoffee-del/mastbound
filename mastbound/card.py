@@ -68,16 +68,16 @@ def render(addr, r):
     d = ImageDraw.Draw(img)
     # başlık
     d.text((PAD, PAD), "MASTBOUND", font=_font(44, True), fill=INK)
-    d.text((PAD, PAD + 60), "Pişmanlık Aynası", font=_font(32), fill=INK2)
+    d.text((PAD, PAD + 60), "Regret Mirror", font=_font(32), fill=INK2)
     short = f"{addr[:4]}…{addr[-4:]}"
     d.text((W - PAD - d.textlength(short, font=_font(30)), PAD + 10), short, font=_font(30), fill=INK3)
 
     # kahraman sayı: kağıt el puanı
     y = 250
-    d.text((PAD, y), "Kağıt el puanı", font=_font(34), fill=INK2)
+    d.text((PAD, y), "Paper Hands Score", font=_font(34), fill=INK2)
     if r.score is None:
         d.text((PAD, y + 50), "—", font=_font(150, True), fill=INK)
-        d.text((PAD, y + 230), f"Yeterli veri yok: {r.measured} işlem ölçülebildi, en az {MIN_SCORED} gerekli",
+        d.text((PAD, y + 230), f"Not enough data: {r.measured} trades measurable, need {MIN_SCORED}",
                font=_font(28), fill=INK3)
     else:
         big = str(r.score)
@@ -89,39 +89,39 @@ def render(addr, r):
         d.rounded_rectangle([PAD, by, PAD + bw, by + 18], radius=9, fill=TRACK)
         fw = max(18, int(bw * r.score / 100))
         d.rounded_rectangle([PAD, by, PAD + fw, by + 18], radius=9, fill=severity(r.score))
-        d.text((PAD, by + 30), "sakin", font=_font(24), fill=INK3)
-        d.text((PAD + bw - d.textlength("kağıt el", font=_font(24)), by + 30), "kağıt el", font=_font(24), fill=INK3)
+        d.text((PAD, by + 30), "calm", font=_font(24), fill=INK3)
+        d.text((PAD + bw - d.textlength("paper hands", font=_font(24)), by + 30), "paper hands", font=_font(24), fill=INK3)
 
     # 2×2 kutucuk
     ty, gap = 600, 24
     tw, th = (W - 2 * PAD - gap) // 2, 164
-    _tile(d, PAD, ty, tw, th, "Erken satışla kaçan", compact_usd(r.missed_usd))
+    _tile(d, PAD, ty, tw, th, "Missed by selling early", compact_usd(r.missed_usd))
     if r.closed:
         up = r.realized_pnl >= 0
-        _tile(d, PAD + tw + gap, ty, tw, th, f"Kâr/zarar · kazanma %{r.wins / r.closed * 100:.0f}",
+        _tile(d, PAD + tw + gap, ty, tw, th, f"Realized PnL · win {r.wins / r.closed * 100:.0f}%",
               compact_usd(r.realized_pnl), "▲" if up else "▼", GOOD if up else CRIT)
     else:
-        _tile(d, PAD + tw + gap, ty, tw, th, "Kâr/zarar", "—")
-    _tile(d, PAD, ty + th + gap, tw, th, "Panik satış", str(r.panic_sells))
-    _tile(d, PAD + tw + gap, ty + th + gap, tw, th, "FOMO alım", str(r.fomo_buys))
+        _tile(d, PAD + tw + gap, ty, tw, th, "Realized PnL", "—")
+    _tile(d, PAD, ty + th + gap, tw, th, "Panic sells", str(r.panic_sells))
+    _tile(d, PAD + tw + gap, ty + th + gap, tw, th, "FOMO buys", str(r.fomo_buys))
 
     # en büyük pişmanlıklar
     ly = ty + 2 * th + gap + 48
     if r.worst:
-        d.text((PAD, ly), "En büyük pişmanlıklar", font=_font(32, True), fill=INK)
+        d.text((PAD, ly), "Biggest regrets", font=_font(32, True), fill=INK)
         for i, (miss, sym, p, hi, n) in enumerate(r.worst[:3]):
             yy = ly + 56 + i * 52
             d.text((PAD, yy), f"{sym[:12]}", font=_font(30, True), fill=INK)
             kez = f"{n}× " if n > 1 else ""
-            mid = f"{kez}sattın {fmt_price(p)} → sonra {fmt_price(hi)}"
+            mid = f"{kez}sold {fmt_price(p)} → later {fmt_price(hi)}"
             d.text((PAD + 230, yy), mid, font=_font(28), fill=INK2)
             val = compact_usd(miss)
             d.text((W - PAD - d.textlength(val, font=_font(30, True)), yy), val, font=_font(30, True), fill=INK)
     else:
-        d.text((PAD, ly), f"{r.trades} işlem incelendi · {r.tokens} token", font=_font(30), fill=INK2)
+        d.text((PAD, ly), f"{r.trades} trades analyzed · {r.tokens} tokens", font=_font(30), fill=INK2)
 
     # alt bilgi
-    foot = "Yatırım tavsiyesi değildir; geçmiş işlemlerin ölçümüdür."
+    foot = "Not financial advice — a measurement of past trades only."
     d.text((PAD, H - PAD - 34), foot, font=_font(24), fill=INK3)
     d.rectangle([0, H - 10, W, H], fill=ACCENT)
     buf = io.BytesIO()

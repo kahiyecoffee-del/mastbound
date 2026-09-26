@@ -16,9 +16,9 @@ from .card import render
 from .chain import DataError, wallet_report
 
 ADDR = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
-WELCOME = ("⚓ Mastbound'a hoş geldin!\n\nSolana cüzdan adresini gönder; erken satışların, panik satışların ve "
-           "FOMO alımların sana neye mal olduğunu hesaplayayım.\n\nSadece herkese açık zincir verisini okurum. "
-           "Asla özel anahtarını ya da gizli kelimelerini isteme(m) — isteyen biri olursa dolandırıcıdır.")
+WELCOME = ("⚓ Welcome to Mastbound!\n\nSend a Solana wallet address and I'll show you what early sells, panic sells "
+           "and FOMO buys have cost you.\n\nI only read public on-chain data. I will never ask for your private key "
+           "or seed phrase — anyone who does is a scammer.")
 COOLDOWN = 60          # aynı kullanıcı için saniye
 
 
@@ -50,7 +50,7 @@ class Bot:
             try:
                 r = wallet_report(addr, self.helius)
                 if not r.trades:
-                    self.send(chat, "Bu cüzdanda SOL/USDC karşılığı bir alım-satım bulamadım.")
+                    self.send(chat, "No SOL/USDC trades found for this wallet.")
                     continue
                 text = card_text(addr, r)
                 try:
@@ -62,10 +62,10 @@ class Bot:
                     self.send(chat, text)
             except DataError as e:
                 print(f"veri hatası {addr}: {e}", flush=True)
-                self.send(chat, "İşlem verisine şu an ulaşılamadı (veri sağlayıcı hatası). Birkaç dakika sonra tekrar dene.")
+                self.send(chat, "Could not reach trade data right now (data provider error). Please try again in a few minutes.")
             except Exception as e:                   # kullanıcıya kısa hata, ayrıntı loga
                 print(f"hata {addr}: {type(e).__name__}: {e}", flush=True)
-                self.send(chat, "Şu an analiz yapılamadı, birkaç dakika sonra tekrar dene.")
+                self.send(chat, "Analysis failed right now, please try again in a few minutes.")
 
     def handle(self, msg):
         chat = msg["chat"]["id"]
@@ -74,11 +74,11 @@ class Bot:
             return self.send(chat, WELCOME)
         addr = text.split()[-1] if text else ""
         if not ADDR.match(addr):
-            return self.send(chat, "Geçerli bir Solana cüzdan adresi gönder (32-44 karakter).")
+            return self.send(chat, "Please send a valid Solana wallet address (32-44 characters).")
         if time.time() - self.last.get(chat, 0) < COOLDOWN:
-            return self.send(chat, "Biraz bekle, bir önceki analiz daha yeni bitti.")
+            return self.send(chat, "Please wait a moment — your previous analysis just finished.")
         self.last[chat] = time.time()
-        self.send(chat, f"🔍 Analiz ediliyor… (sırada {self.jobs.qsize()} kişi var, 1-2 dakika sürebilir)")
+        self.send(chat, f"🔍 Analyzing… ({self.jobs.qsize()} ahead of you, may take 1-3 minutes)")
         self.jobs.put((chat, addr))
 
     def run(self):

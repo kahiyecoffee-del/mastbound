@@ -165,31 +165,31 @@ def paper_hands_score(r):
 
 def caption(addr, r):
     """Görselin altındaki kısa açıklama (ayrıntı görselde)."""
-    extra = f" · {r.unmeasured} yeni işlem değerlendirilmedi" if r.unmeasured else ""
-    return (f"⚓ Mastbound · {addr[:4]}…{addr[-4:]} · {r.trades} işlem, {r.tokens} token{extra}\n"
-            "Yatırım tavsiyesi değildir; geçmiş işlemlerin ölçümüdür.")
+    extra = f" · {r.unmeasured} recent trades not scored yet" if r.unmeasured else ""
+    return (f"⚓ Mastbound · {addr[:4]}…{addr[-4:]} · {r.trades} trades, {r.tokens} tokens{extra}\n"
+            "Not financial advice — a measurement of past trades only.")
 
 
 def card_text(addr, r):
     short = f"{addr[:4]}…{addr[-4:]}"
-    lines = [f"⚓ MASTBOUND — Pişmanlık Aynası ({short})", "",
-             f"İncelenen işlem: {r.trades} ({r.buys} alım, {r.sells} satış, {r.tokens} token)"]
+    lines = [f"⚓ MASTBOUND — Regret Mirror ({short})", "",
+             f"Trades analyzed: {r.trades} ({r.buys} buys, {r.sells} sells, {r.tokens} tokens)"]
     if r.closed:
         sign = "+" if r.realized_pnl >= 0 else "−"
-        lines.append(f"Gerçekleşen kâr/zarar: {sign}${abs(r.realized_pnl):,.0f} | "
-                     f"kazanma oranı %{r.wins / r.closed * 100:.0f} ({r.wins}/{r.closed})")
-    lines += [f"Erken satışla kaçırılan kazanç: ${r.missed_usd:,.0f}",
-              f"Panik satış: {r.panic_sells} | FOMO alım: {r.fomo_buys}"]
+        lines.append(f"Realized PnL: {sign}${abs(r.realized_pnl):,.0f} | "
+                     f"win rate {r.wins / r.closed * 100:.0f}% ({r.wins}/{r.closed})")
+    lines += [f"Missed by selling early: ${r.missed_usd:,.0f}",
+              f"Panic sells: {r.panic_sells} | FOMO buys: {r.fomo_buys}"]
     if r.score is None:
-        lines.append(f"🧻 Kağıt el puanı: yeterli veri yok ({r.measured} işlem ölçülebildi, en az {MIN_SCORED} gerekli)")
+        lines.append(f"🧻 Paper Hands Score: not enough data ({r.measured} trades measurable, need {MIN_SCORED})")
     else:
-        lines.append(f"🧻 Kağıt el puanı: {r.score}/100")
+        lines.append(f"🧻 Paper Hands Score: {r.score}/100")
     if r.unmeasured:
-        lines.append(f"({r.unmeasured} işlem son 2 saatte yapıldı ya da fiyatı bulunamadı; değerlendirilmedi)")
+        lines.append(f"({r.unmeasured} trades are from the last 2 hours or have no price data; not scored)")
     if r.worst:
-        lines += ["", "En büyük pişmanlıklar:"]
+        lines += ["", "Biggest regrets:"]
         for miss, sym, p, hi, n in r.worst:
-            kez = f" ({n} satış)" if n > 1 else ""
-            lines.append(f"• {sym}{kez}: ort. ${p:.6g}'den sattın, sonra ${hi:.6g} gördü → ${miss:,.0f} kaçtı")
-    lines += ["", "Bu bir yatırım tavsiyesi değildir; yalnız geçmiş işlemlerinin ölçümüdür."]
+            kez = f" ({n} sells)" if n > 1 else ""
+            lines.append(f"• {sym}{kez}: sold at avg ${p:.6g}, later hit ${hi:.6g} → ${miss:,.0f} missed")
+    lines += ["", "Not financial advice — a measurement of your past trades only."]
     return "\n".join(lines)
