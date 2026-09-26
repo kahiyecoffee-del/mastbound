@@ -11,7 +11,10 @@ import os
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from functools import lru_cache
+
 from .analysis import MIN_SCORED
+from .logo import render_logo
 
 W, H = 1080, 1350
 PAD = 64
@@ -144,14 +147,21 @@ def _tile(d, x, y, w, h, label, value, marker=None, marker_color=None):
     d.text((vx, y + 66), value, font=_font(50, True), fill=INK)
 
 
+@lru_cache(maxsize=2)
+def _logo(size):
+    return render_logo(size)
+
+
 def render(addr, r):
     img = _background()
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
 
     # başlık
-    d.text((PAD, PAD), "⚓ MASTBOUND", font=_font(40, True), fill=INK)
-    d.text((PAD, PAD + 54), "Regret Mirror", font=_font(28), fill=INK2)
+    lg = _logo(96)
+    layer.alpha_composite(lg, (PAD, PAD - 6))
+    d.text((PAD + 112, PAD + 2), "MASTBOUND", font=_font(40, True), fill=INK)
+    d.text((PAD + 112, PAD + 54), "Regret Mirror", font=_font(28), fill=INK2)
     short = f"{addr[:4]}…{addr[-4:]}"
     sw = d.textlength(short, font=_font(26))
     d.rounded_rectangle([W - PAD - sw - 36, PAD + 4, W - PAD, PAD + 52], radius=24, fill=(255, 255, 255, 30))
