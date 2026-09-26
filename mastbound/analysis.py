@@ -55,7 +55,7 @@ class Report:
     wins: int = 0
     closed: int = 0
     tokens: int = 0
-    worst: list = field(default_factory=list)     # (kaçırılan $, sembol, satış fiyatı, sonraki zirve)
+    worst: list = field(default_factory=list)     # (kaçan $, sembol, ort. satış fiyatı, sonraki zirve, satış sayısı)
     score: object = None                          # int ya da None (yetersiz veri)
 
     def summary(self):
@@ -87,7 +87,14 @@ def analyze(trades, prices):
     r = Report(trades=len(trades))
     series = {m: Series(s) for m, s in prices.items()}
     cost = {}                                    # mint -> [adet, toplam maliyet $]
-    for t in sorted(trades, key=lambda x: x.ts):
+    trades = sorted(trades, key=lambda x: x.ts)
+    # satıştan sonra aynı token'ı geri alan kazancı kaçırmış sayılmaz: sonraki alımlar (FIFO) satışı mahsup eder
+    rebuy = {}                                   # mint -> [[ts, kalan adet], ...]
+    for t in trades:
+        if t.side == "buy":
+            rebuy.setdefault(t.mint, []).append([t.ts, t.amount])
+    per_token = {}                               # mint -> [kaçan $, sembol, satış $ toplamı, satılan adet, zirve, adet]
+    for t in trades:
         s = series.get(t.mint) or Series({})
         after = s.window(t.ts + 1, t.ts + WINDOW)
         week = s.window(t.ts + 1, t.ts + 7 * DAY)
@@ -122,15 +129,28 @@ def analyze(trades, prices):
         r.measured += 1
         hi = max(after)
         if hi >= t.price * (1 + MIN_MISS):
-            miss = (hi - t.price) * t.amount
-            r.missed_usd += miss
-            r.early_sells += 1
-            r.worst.append((miss, t.symbol or t.mint[:6], t.price, hi))
+            left = t.amount
+            for b in rebuy.get(t.mint, []):
+                if left <= 0:
+                    break
+                if t.ts < b[0] <= t.ts + WINDOW and b[1] > 0:
+                    used = min(left, b[1])
+                    b[1] -= used
+                    left -= used
+            if left > 0:
+                miss = (hi - t.price) * left
+                r.missed_usd += miss
+                r.early_sells += 1
+                a = per_token.setdefault(t.mint, [0.0, t.symbol or t.mint[:6], 0.0, 0.0, 0.0, 0])
+                a[0] += miss
+                a[2] += t.price * left
+                a[3] += left
+                a[4] = max(a[4], hi)
+                a[5] += 1
         if before and t.price <= before * (1 - PANIC_DROP) and week and max(week) > t.price:
             r.panic_sells += 1
     r.tokens = len({t.mint for t in trades})
-    r.worst.sort(reverse=True)
-    r.worst = r.worst[:3]
+    r.worst = sorted(((a[0], a[1], a[2] / a[3], a[4], a[5]) for a in per_token.values()), reverse=True)[:3]
     r.score = paper_hands_score(r)
     return r
 
@@ -141,6 +161,13 @@ def paper_hands_score(r):
         return None
     emo = r.early_sells + r.panic_sells + r.fomo_buys
     return int(round(min(1.0, emo / r.measured * 1.5) * 100))
+
+
+def caption(addr, r):
+    """Görselin altındaki kısa açıklama (ayrıntı görselde)."""
+    extra = f" · {r.unmeasured} yeni işlem değerlendirilmedi" if r.unmeasured else ""
+    return (f"⚓ Mastbound · {addr[:4]}…{addr[-4:]} · {r.trades} işlem, {r.tokens} token{extra}\n"
+            "Yatırım tavsiyesi değildir; geçmiş işlemlerin ölçümüdür.")
 
 
 def card_text(addr, r):
@@ -161,7 +188,8 @@ def card_text(addr, r):
         lines.append(f"({r.unmeasured} işlem son 2 saatte yapıldı ya da fiyatı bulunamadı; değerlendirilmedi)")
     if r.worst:
         lines += ["", "En büyük pişmanlıklar:"]
-        for miss, sym, p, hi in r.worst:
-            lines.append(f"• {sym}: ${p:.6g}'den sattın, sonra ${hi:.6g} gördü → ${miss:,.0f} kaçtı")
+        for miss, sym, p, hi, n in r.worst:
+            kez = f" ({n} satış)" if n > 1 else ""
+            lines.append(f"• {sym}{kez}: ort. ${p:.6g}'den sattın, sonra ${hi:.6g} gördü → ${miss:,.0f} kaçtı")
     lines += ["", "Bu bir yatırım tavsiyesi değildir; yalnız geçmiş işlemlerinin ölçümüdür."]
     return "\n".join(lines)

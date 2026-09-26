@@ -11,7 +11,7 @@ import time
 
 import requests
 
-from .analysis import card_text
+from .analysis import caption, card_text
 from .card import render
 from .chain import DataError, wallet_report
 
@@ -54,7 +54,7 @@ class Bot:
                     continue
                 text = card_text(addr, r)
                 try:
-                    ok = self.send_photo(chat, render(addr, r), text)
+                    ok = self.send_photo(chat, render(addr, r), caption(addr, r))
                 except Exception as e:                   # görsel üretilemezse metinle devam
                     print(f"kart hatası: {type(e).__name__}: {e}", flush=True)
                     ok = False

@@ -109,10 +109,11 @@ def render(addr, r):
     ly = ty + 2 * th + gap + 48
     if r.worst:
         d.text((PAD, ly), "En büyük pişmanlıklar", font=_font(32, True), fill=INK)
-        for i, (miss, sym, p, hi) in enumerate(r.worst[:3]):
+        for i, (miss, sym, p, hi, n) in enumerate(r.worst[:3]):
             yy = ly + 56 + i * 52
             d.text((PAD, yy), f"{sym[:12]}", font=_font(30, True), fill=INK)
-            mid = f"sattın {fmt_price(p)} → sonra {fmt_price(hi)}"
+            kez = f"{n}× " if n > 1 else ""
+            mid = f"{kez}sattın {fmt_price(p)} → sonra {fmt_price(hi)}"
             d.text((PAD + 230, yy), mid, font=_font(28), fill=INK2)
             val = compact_usd(miss)
             d.text((W - PAD - d.textlength(val, font=_font(30, True)), yy), val, font=_font(30, True), fill=INK)

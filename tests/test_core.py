@@ -73,7 +73,17 @@ def test_to_trades_usdc_buy_and_wsol():
 def test_card_png():
     from mastbound.analysis import Report
     from mastbound.card import fmt_price, render
-    png = render(ME, Report(trades=3, measured=3, score=50, worst=[(10.0, "TOK", 0.0000212, 0.00003)]))
+    png = render(ME, Report(trades=3, measured=3, score=50, worst=[(10.0, "TOK", 0.0000212, 0.00003, 2)]))
     assert png[:8] == b"\x89PNG\r\n\x1a\n"
     assert fmt_price(0.0000212) == "$0.0000212" and fmt_price(1.82) == "$1.82"
     assert render(ME, Report(trades=1, score=None))[:4] == b"\x89PNG"
+
+
+def test_rebuy_offsets_regret_and_groups_by_token():
+    px = daily([1.0, 1.0, 2.0] + [2.0] * 5)
+    trades = [Trade(T0 + 10, TOK, "sell", 100, 100, "TOK"),        # 1.0'dan sattı
+              Trade(T0 + 20, TOK, "sell", 100, 100, "TOK"),
+              Trade(T0 + DAY, TOK, "buy", 150, 150, "TOK")]        # 150'sini geri aldı
+    r = analyze(trades, {TOK: px})
+    assert round(r.missed_usd) == 50                                # yalnız geri alınmayan 50 adet × (2-1)
+    assert len(r.worst) == 1 and r.worst[0][1] == "TOK"
