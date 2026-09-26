@@ -11,14 +11,25 @@ import time
 
 import requests
 
+from . import social
 from .analysis import caption, card_text
-from .card import render
+from .card import compact_usd, persona, render
 from .chain import DataError, wallet_report
 
 ADDR = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 WELCOME = ("⚓ Welcome to Mastbound!\n\nSend a Solana wallet address and I'll show you what early sells, panic sells "
            "and FOMO buys have cost you.\n\nI only read public on-chain data. I will never ask for your private key "
            "or seed phrase — anyone who does is a scammer.")
+HELP = ("Commands:\n/regret <wallet> — your Regret Mirror card (works in groups too)\n/about — what Mastbound is\n"
+        "/safety — how to stay safe\n/token — $MBOUND info\n\nIn a private chat you can also just paste a wallet address.")
+FAQ = {
+    "/about": ("⚓ Mastbound is a behavioral mirror for crypto traders.\n\nThe Regret Mirror reads a Solana wallet's public swap "
+               "history and shows early sells, panic sells, FOMO buys and a Paper Hands Score (0-100). Next: the Ulysses "
+               "Lock — commit to your plan before the storm.\n\nRead-only. Not financial advice."),
+    "/safety": ("🔐 Stay safe:\n• We NEVER ask for your seed phrase or private key.\n• Admins never DM you first.\n"
+                "• The Regret Mirror only needs a public address — no wallet connect, no signature.\n"
+                "• Official token address is only announced in this bot's /token and our official channels."),
+}
 COOLDOWN = 60          # aynı kullanıcı için saniye
 
 
@@ -28,6 +39,14 @@ class Bot:
         self.helius = helius_key
         self.jobs = queue.Queue()
         self.last = {}
+        self.username = None
+
+    def fetch_username(self):
+        try:
+            self.username = requests.get(f"{self.api}/getMe", timeout=30).json()["result"]["username"]
+        except (requests.RequestException, ValueError, KeyError):
+            pass
+        return self.username
 
     def send(self, chat, text):
         try:
@@ -69,15 +88,33 @@ class Bot:
 
     def handle(self, msg):
         chat = msg["chat"]["id"]
+        private = msg["chat"].get("type") == "private"
+        user = (msg.get("from") or {}).get("id", chat)
         text = (msg.get("text") or "").strip()
-        if text.startswith("/start") or text.startswith("/help"):
-            return self.send(chat, WELCOME)
-        addr = text.split()[-1] if text else ""
+        words = text.split()
+        cmd = words[0].lower() if words and words[0].startswith("/") else ""
+        if "@" in cmd:                          # /regret@BotAdı → yalnız bize yazılmışsa
+            cmd, _, target = cmd.partition("@")
+            if self.username and target != self.username.lower():
+                return None
+        if not private and not cmd:
+            return None                         # grupta düz sohbete karışma
+        if cmd in ("/start", "/help"):
+            return self.send(chat, WELCOME + "\n\n" + HELP if cmd == "/start" else HELP)
+        if cmd in FAQ:
+            return self.send(chat, FAQ[cmd])
+        if cmd == "/token":
+            return self.send(chat, token_info())
+        if cmd and cmd != "/regret":
+            return None if not private else self.send(chat, HELP)
+        addr = words[-1] if words else ""
         if not ADDR.match(addr):
-            return self.send(chat, "Please send a valid Solana wallet address (32-44 characters).")
-        if time.time() - self.last.get(chat, 0) < COOLDOWN:
-            return self.send(chat, "Please wait a moment — your previous analysis just finished.")
-        self.last[chat] = time.time()
+            return self.send(chat, "Usage: /regret <Solana wallet address>" if cmd
+                             else "Please send a valid Solana wallet address (32-44 characters).")
+        key = (chat, user)
+        if time.time() - self.last.get(key, 0) < COOLDOWN:
+            return self.send(chat, "Please wait a minute before the next analysis.")
+        self.last[key] = time.time()
         self.send(chat, f"🔍 Analyzing… ({self.jobs.qsize()} ahead of you, may take 1-3 minutes)")
         self.jobs.put((chat, addr))
 
@@ -97,8 +134,35 @@ class Bot:
                     self.handle(u["message"])
 
 
+def token_info():
+    mint = os.environ.get("MBOUND_MINT")
+    if not mint:
+        return ("$MBOUND has not launched yet. The official contract address will be posted here (/token) and on our "
+                "official channels only. Any 'MBOUND' token you see before that is fake.")
+    return (f"$MBOUND official contract address:\n{mint}\n\nAlways verify it here before buying. "
+            "Holding $MBOUND unlocks Standard / Pro features. Not financial advice.")
+
+
+def x_reply(addr, helius):
+    """X etiketine cevap: kısa metin + kart görseli."""
+    r = wallet_report(addr, helius)
+    if not r.trades:
+        return f"⚓ No SOL/USDC trades found for {addr[:4]}…{addr[-4:]}.", None
+    title, _ = persona(r.score)
+    score = "not enough data yet" if r.score is None else f"{r.score}/100"
+    text = (f"⚓ {addr[:4]}…{addr[-4:]} — {title}\nPaper Hands Score: {score}\n"
+            f"Missed by selling early: {compact_usd(r.missed_usd)}\nNot financial advice.")
+    try:
+        return text, render(addr, r)
+    except Exception:
+        return text, None
+
+
 def main():
-    Bot(os.environ["TELEGRAM_BOT_TOKEN"], os.environ["HELIUS_API_KEY"]).run()
+    token, helius = os.environ["TELEGRAM_BOT_TOKEN"], os.environ["HELIUS_API_KEY"]
+    bot = Bot(token, helius)
+    social.start_from_env(token, lambda a: x_reply(a, helius), bot.fetch_username())
+    bot.run()
 
 
 if __name__ == "__main__":
