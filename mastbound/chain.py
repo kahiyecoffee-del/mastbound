@@ -8,7 +8,7 @@ import time
 
 import requests
 
-from .analysis import DAY, Trade
+from .analysis import DAY, Series, Trade
 
 SOL = "So11111111111111111111111111111111111111112"
 USD_MINTS = {"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC",
@@ -80,6 +80,7 @@ def to_trades(address, txs, sol_prices):
     """Her işlemde cüzdanın net token değişimlerinden alım/satım çıkarır.
     Karşı taraf SOL ya da USD stablecoin ise USD değeri hesaplanır; diğer (token↔token) işlemler atlanır."""
     trades = []
+    sol_series = sol_prices if isinstance(sol_prices, Series) else Series(sol_prices)
     for tx in txs:
         ts = tx.get("timestamp")
         if not ts:
@@ -104,7 +105,7 @@ def to_trades(address, txs, sol_prices):
         if len(others) != 1:
             continue
         mint, qty = next(iter(others.items()))
-        solp = sol_prices.get(int(ts // DAY)) or sol_prices.get(int(ts // DAY) - 1)
+        solp = sol_series.at_or_before(ts, 2 * DAY)
         quote_usd = usd_q + (sol * solp if solp else 0.0)
         if qty < 0 and quote_usd > 0:
             trades.append(Trade(ts, mint, "sell", -qty, quote_usd))
@@ -118,9 +119,15 @@ def _cache_path(name):
     return os.path.join(CACHE, name)
 
 
-def daily_prices(mint, max_age_h=12):
-    """{gün_no: kapanış USD}. En derin havuzun günlük mumları; sonuç önbelleğe alınır."""
-    p = _cache_path(f"px_{mint}.json")
+def _ohlcv(pool, token_side, tf):
+    o = _get(f"{GT}/networks/solana/pools/{pool}/ohlcv/{tf}",
+             {"limit": 1000, "currency": "usd", "token": token_side}, gt=True)
+    return {int(row[0]): float(row[4]) for row in ((o or {}).get("data") or {}).get("attributes", {}).get("ohlcv_list", [])}
+
+
+def prices(mint, since_ts=None, max_age_h=1):
+    """{unix_saniye: kapanış USD}: son ~41 gün saatlik, daha eskisi (gerekirse) günlük. Önbellekli."""
+    p = _cache_path(f"px2_{mint}.json")
     if os.path.exists(p) and time.time() - os.path.getmtime(p) < max_age_h * 3600:
         return {int(k): v for k, v in json.load(open(p)).items()}
     j = _get(f"{GT}/networks/solana/tokens/{mint}/pools", {"page": 1}, gt=True)
@@ -128,13 +135,18 @@ def daily_prices(mint, max_age_h=12):
     series = {}
     if pools:
         best = max(pools, key=lambda d: float(d["attributes"].get("reserve_in_usd") or 0))
-        base_is = best["relationships"]["base_token"]["data"]["id"].endswith(mint)
-        o = _get(f"{GT}/networks/solana/pools/{best['attributes']['address']}/ohlcv/day",
-                 {"limit": 1000, "currency": "usd", "token": "base" if base_is else "quote"}, gt=True)
-        for row in ((o or {}).get("data") or {}).get("attributes", {}).get("ohlcv_list", []):
-            series[int(row[0] // DAY)] = float(row[4])
+        side = "base" if best["relationships"]["base_token"]["data"]["id"].endswith(mint) else "quote"
+        pool = best["attributes"]["address"]
+        hourly = _ohlcv(pool, side, "hour")
+        first_hour = min(hourly) if hourly else time.time()
+        if since_ts is None or since_ts < first_hour:
+            series.update({k: v for k, v in _ohlcv(pool, side, "day").items() if k < first_hour})
+        series.update(hourly)
     json.dump(series, open(p, "w"))
     return series
+
+
+daily_prices = prices          # geriye dönük ad
 
 
 def symbol_of(mint):
@@ -147,17 +159,20 @@ def symbol_of(mint):
     return cache[mint]
 
 
-def wallet_report(address, api_key, max_tokens=25):
+def wallet_report(address, api_key, max_tokens=15):
     from .analysis import analyze
-    sol_px = daily_prices(SOL)
+    sol_px = prices(SOL)
     trades = to_trades(address, fetch_transactions(address, api_key), sol_px)
     # en çok işlem yapılan token'lar (istek sınırı için)
     counts = {}
     for t in trades:
         counts[t.mint] = counts.get(t.mint, 0) + 1
     keep = sorted(counts, key=counts.get, reverse=True)[:max_tokens]
-    prices = {m: daily_prices(m) for m in keep}
-    trades = [t for t in trades if t.mint in prices]
+    oldest = {}
+    for t in trades:
+        oldest[t.mint] = min(oldest.get(t.mint, t.ts), t.ts)
+    px = {m: prices(m, oldest[m]) for m in keep}
+    trades = [t for t in trades if t.mint in px]
     for t in trades:
         t.symbol = symbol_of(t.mint)
-    return analyze(trades, prices)
+    return analyze(trades, px)

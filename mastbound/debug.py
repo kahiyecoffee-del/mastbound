@@ -11,8 +11,8 @@ def main():
     addr = sys.argv[1]
     key = os.environ.get("HELIUS_API_KEY", "")
     print(f"Helius anahtarı tanımlı mı: {'evet' if key else 'HAYIR'}")
-    sol = chain.daily_prices(chain.SOL)
-    print(f"SOL günlük fiyat sayısı: {len(sol)}  (GeckoTerminal son durum: {chain.LAST['status']})")
+    sol = chain.prices(chain.SOL)
+    print(f"SOL fiyat noktası sayısı: {len(sol)}  (GeckoTerminal son durum: {chain.LAST['status']})")
     try:
         txs = chain.fetch_transactions(addr, key)
     except chain.DataError as e:
