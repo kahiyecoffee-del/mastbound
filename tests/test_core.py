@@ -68,3 +68,12 @@ def test_to_trades_usdc_buy_and_wsol():
         {"fromUserAccount": ME, "toUserAccount": "pool", "mint": SOL, "tokenAmount": 1},
         {"fromUserAccount": "pool", "toUserAccount": ME, "mint": TOK, "tokenAmount": 10}]}
     assert to_trades(ME, [tx2], {T0: 100.0})[0].usd == 100.0
+
+
+def test_card_png():
+    from mastbound.analysis import Report
+    from mastbound.card import fmt_price, render
+    png = render(ME, Report(trades=3, measured=3, score=50, worst=[(10.0, "TOK", 0.0000212, 0.00003)]))
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert fmt_price(0.0000212) == "$0.0000212" and fmt_price(1.82) == "$1.82"
+    assert render(ME, Report(trades=1, score=None))[:4] == b"\x89PNG"

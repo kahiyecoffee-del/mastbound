@@ -6,6 +6,7 @@ DIR=/opt/mastbound
 ENV=/etc/mastbound.env
 if [ -d "$DIR/.git" ]; then git -C "$DIR" pull -q; else git clone -q https://github.com/kahiyecoffee-del/mastbound "$DIR"; fi
 cd "$DIR"
+command -v fc-list >/dev/null && fc-list | grep -qi dejavu || apt-get install -y -q fonts-dejavu-core >/dev/null
 [ -x venv/bin/python ] || python3 -m venv venv
 venv/bin/pip install -q --upgrade pip
 venv/bin/pip install -q -r requirements.txt

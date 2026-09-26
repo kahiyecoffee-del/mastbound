@@ -12,6 +12,7 @@ import time
 import requests
 
 from .analysis import card_text
+from .card import render
 from .chain import DataError, wallet_report
 
 ADDR = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -35,13 +36,30 @@ class Bot:
         except requests.RequestException:
             pass
 
+    def send_photo(self, chat, png, caption):
+        try:
+            r = requests.post(f"{self.api}/sendPhoto", data={"chat_id": chat, "caption": caption[:1000]},
+                              files={"photo": ("mastbound.png", png, "image/png")}, timeout=60)
+            return r.ok
+        except requests.RequestException:
+            return False
+
     def worker(self):
         while True:
             chat, addr = self.jobs.get()
             try:
                 r = wallet_report(addr, self.helius)
-                self.send(chat, card_text(addr, r) if r.trades else
-                          "Bu cüzdanda SOL/USDC karşılığı bir alım-satım bulamadım.")
+                if not r.trades:
+                    self.send(chat, "Bu cüzdanda SOL/USDC karşılığı bir alım-satım bulamadım.")
+                    continue
+                text = card_text(addr, r)
+                try:
+                    ok = self.send_photo(chat, render(addr, r), text)
+                except Exception as e:                   # görsel üretilemezse metinle devam
+                    print(f"kart hatası: {type(e).__name__}: {e}", flush=True)
+                    ok = False
+                if not ok:
+                    self.send(chat, text)
             except DataError as e:
                 print(f"veri hatası {addr}: {e}", flush=True)
                 self.send(chat, "İşlem verisine şu an ulaşılamadı (veri sağlayıcı hatası). Birkaç dakika sonra tekrar dene.")
