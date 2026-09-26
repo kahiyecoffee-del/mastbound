@@ -183,8 +183,8 @@ def render(addr, r):
     layer = Image.alpha_composite(layer, boat_layer)
     d = ImageDraw.Draw(layer)
     _waves(d, 480, 10, 110, 0.0)
-    d.text((gx - rad - 28, gy + 20), "calm", font=_font(22), fill=INK3)
-    d.text((gx + rad - 40, gy + 20), "paper", font=_font(22), fill=INK3)
+    d.text((gx - rad - 28, gy + 30), "calm", font=_font(22), fill=INK3)
+    d.text((gx + rad - 40, gy + 30), "paper", font=_font(22), fill=INK3)
 
     # kişilik
     title, line = persona(r.score)
@@ -219,7 +219,14 @@ def render(addr, r):
             val = compact_usd(miss)
             d.text((W - PAD - d.textlength(val, font=_font(27, True)), yy), val, font=_font(27, True), fill=INK)
     else:
-        d.text((PAD, ly), f"{r.trades} trades analyzed · {r.tokens} tokens", font=_font(28), fill=INK2)
+        d.text((PAD, ly), "Clean exits" if r.sells else "No sells yet", font=_font(30, True), fill=INK)
+        msg = ("No sell was followed by a 10%+ run within 30 days." if r.sells
+               else "Nothing sold, nothing to regret — yet.")
+        d.text((PAD, ly + 50), msg, font=_font(25), fill=INK2)
+    log = f"{r.trades} trades · {r.tokens} tokens · {r.measured} scored"
+    if r.unmeasured:
+        log += f" · {r.unmeasured} too recent / no price"
+    d.text((PAD, H - 118), log, font=_font(23), fill=INK3)
 
     # alt dalgalar + alt bilgi
     _waves(d, H - 70, 8, 70, 1.3)

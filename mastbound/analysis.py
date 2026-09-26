@@ -6,9 +6,11 @@ Seri karışık çözünürlükte olabilir (son günler saatlik, eskisi günlük
 Tanımlar (hepsi yalnız o işlemden SONRAKİ fiyatla ölçülür):
   erken satış  : satıştan sonraki WINDOW içinde görülen en yüksek fiyat satış fiyatının en az %MIN_MISS üstüne
                  çıktıysa, kaçırılan = (en yüksek − satış fiyatı) × satılan miktar
-  panik satış  : satıştan önceki 3 günde fiyat ≥ %PANIC_DROP düşmüş ve 7 gün içinde satış fiyatının üstüne dönmüş
-  FOMO alım    : alımdan önceki 3 günde fiyat ≥ %FOMO_RISE yükselmiş ve 7 gün içinde alım fiyatının
-                 %FOMO_FALL altına inmiş
+  panik satış  : satış fiyatı önceki 3 günün zirvesinin ≥ %PANIC_DROP altında ve 7 gün içinde fiyat satış
+                 fiyatının en az %MIN_MISS üstüne dönmüş
+  FOMO alım    : alım fiyatı önceki 3 günün dibinin ≥ %FOMO_RISE üstünde ve sonrasında fiyat, alımın %MIN_MISS
+                 üstüne hiç çıkmadan %FOMO_FALL altına inmiş (tepeden alım)
+  Önceki 3 gün, en az MIN_BEFORE kadar fiyat geçmişi varsa kullanılır (yeni çıkmış token'lar da ölçülür).
   ölçülemedi   : işlemden sonra yeterli fiyat verisi yok (çok yeni işlem ya da fiyat bulunamadı)
 Kâr-zarar: token başına ortalama maliyetle gerçekleşen kâr/zarar.
 """
@@ -23,6 +25,7 @@ MIN_MISS = 0.10
 PANIC_DROP = 0.15
 FOMO_RISE = 0.30
 FOMO_FALL = 0.15
+MIN_BEFORE = 6 * HOUR         # panik/FOMO için işlemden önce gereken en az fiyat geçmişi
 MIN_SCORED = 3                # puan için en az bu kadar ölçülebilen işlem
 
 
@@ -78,6 +81,11 @@ class Series:
         i, j = bisect_left(self.t, a), bisect_right(self.t, b)
         return self.p[i:j]
 
+    def before(self, ts, span=3 * DAY):
+        """İşlemden önceki `span` içindeki fiyatlar; MIN_BEFORE'dan kısa geçmiş varsa boş."""
+        i, j = bisect_left(self.t, ts - span), bisect_left(self.t, ts)
+        return self.p[i:j] if j > i and ts - self.t[i] >= MIN_BEFORE else []
+
     def last_ts(self):
         return self.t[-1] if self.t else 0
 
@@ -99,7 +107,7 @@ def analyze(trades, prices):
         after = s.window(t.ts + 1, t.ts + WINDOW)
         week = s.window(t.ts + 1, t.ts + 7 * DAY)
         enough = bool(after) and s.last_ts() - t.ts >= MIN_AFTER and t.price > 0
-        before = s.at_or_before(t.ts - 3 * DAY)
+        pre = s.before(t.ts)
         if t.side == "buy":
             r.buys += 1
             c = cost.setdefault(t.mint, [0.0, 0.0])
@@ -109,7 +117,7 @@ def analyze(trades, prices):
                 r.unmeasured += 1
                 continue
             r.measured += 1
-            if before and t.price >= before * (1 + FOMO_RISE) and week and min(week) <= t.price * (1 - FOMO_FALL):
+            if pre and t.price >= min(pre) * (1 + FOMO_RISE) and bought_top(week, t.price):
                 r.fomo_buys += 1
             continue
         r.sells += 1
@@ -147,12 +155,22 @@ def analyze(trades, prices):
                 a[3] += left
                 a[4] = max(a[4], hi)
                 a[5] += 1
-        if before and t.price <= before * (1 - PANIC_DROP) and week and max(week) > t.price:
+        if pre and t.price <= max(pre) * (1 - PANIC_DROP) and week and max(week) >= t.price * (1 + MIN_MISS):
             r.panic_sells += 1
     r.tokens = len({t.mint for t in trades})
     r.worst = sorted(((a[0], a[1], a[2] / a[3], a[4], a[5]) for a in per_token.values()), reverse=True)[:3]
     r.score = paper_hands_score(r)
     return r
+
+
+def bought_top(after, price):
+    """Alımdan sonra fiyat önce %FOMO_FALL düştüyse (arada %MIN_MISS üstüne çıkmadan) True."""
+    for p in after:
+        if p >= price * (1 + MIN_MISS):
+            return False
+        if p <= price * (1 - FOMO_FALL):
+            return True
+    return False
 
 
 def paper_hands_score(r):

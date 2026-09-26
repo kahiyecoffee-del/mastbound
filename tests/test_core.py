@@ -87,3 +87,21 @@ def test_rebuy_offsets_regret_and_groups_by_token():
     r = analyze(trades, {TOK: px})
     assert round(r.missed_usd) == 50                                # yalnız geri alınmayan 50 adet × (2-1)
     assert len(r.worst) == 1 and r.worst[0][1] == "TOK"
+
+
+def test_young_token_fomo_on_hourly_data():
+    # token 10 saatlik: 1.0'dan 2.0'a pompalandı, 2.0'dan alındı, sonra hiç yükselmeden düştü → FOMO
+    px = {T0 + h * HOUR: p for h, p in enumerate([1.0] * 4 + [1.5, 1.8, 2.0, 2.0] + [1.9, 1.6, 1.4] + [1.4] * 5)}
+    r = analyze([Trade(T0 + 7 * HOUR, TOK, "buy", 10, 20)], {TOK: px})
+    assert r.fomo_buys == 1
+    # önce %10+ yükselip sonra düşerse tepeden alım sayılmaz
+    px2 = {**px, T0 + 8 * HOUR: 2.3}
+    assert analyze([Trade(T0 + 7 * HOUR, TOK, "buy", 10, 20)], {TOK: px2}).fomo_buys == 0
+    # 6 saatten kısa geçmiş: panik/FOMO ölçülmez
+    assert analyze([Trade(T0 + 3 * HOUR, TOK, "buy", 10, 10)], {TOK: px}).fomo_buys == 0
+
+
+def test_panic_needs_real_recovery():
+    px = daily([1.0, 0.9, 0.8, 0.8, 0.82, 0.84] + [0.8] * 5)
+    r = analyze([Trade(T0 + 3 * DAY, TOK, "sell", 10, 8)], {TOK: px})   # küçük kıpırtı panik değil
+    assert r.panic_sells == 0
