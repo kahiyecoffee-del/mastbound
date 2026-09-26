@@ -12,7 +12,7 @@ import time
 import requests
 
 from .analysis import card_text
-from .chain import wallet_report
+from .chain import DataError, wallet_report
 
 ADDR = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 WELCOME = ("⚓ Mastbound'a hoş geldin!\n\nSolana cüzdan adresini gönder; erken satışların, panik satışların ve "
@@ -42,6 +42,9 @@ class Bot:
                 r = wallet_report(addr, self.helius)
                 self.send(chat, card_text(addr, r) if r.trades else
                           "Bu cüzdanda SOL/USDC karşılığı bir alım-satım bulamadım.")
+            except DataError as e:
+                print(f"veri hatası {addr}: {e}", flush=True)
+                self.send(chat, "İşlem verisine şu an ulaşılamadı (veri sağlayıcı hatası). Birkaç dakika sonra tekrar dene.")
             except Exception as e:                   # kullanıcıya kısa hata, ayrıntı loga
                 print(f"hata {addr}: {type(e).__name__}: {e}", flush=True)
                 self.send(chat, "Şu an analiz yapılamadı, birkaç dakika sonra tekrar dene.")

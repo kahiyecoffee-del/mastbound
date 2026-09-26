@@ -13,7 +13,8 @@ from .analysis import DAY, Trade
 SOL = "So11111111111111111111111111111111111111112"
 USD_MINTS = {"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": "USDC",
              "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB": "USDT"}
-HELIUS = "https://api.helius.xyz/v0"
+HELIUS_HOSTS = ["https://api-mainnet.helius-rpc.com/v0", "https://api.helius.xyz/v0"]
+LAST = {"status": None, "error": None}
 GT = "https://api.geckoterminal.com/api/v2"
 CACHE = os.environ.get("MASTBOUND_CACHE", "cache")
 _last_gt = [0.0]
@@ -28,26 +29,44 @@ def _get(url, params=None, gt=False, tries=4):
             _last_gt[0] = time.time()
         try:
             r = requests.get(url, params=params, timeout=30, headers={"Accept": "application/json"})
+            LAST["status"], LAST["error"] = r.status_code, None
             if r.status_code == 404:
+                return None
+            if r.status_code in (401, 403):
+                LAST["error"] = r.text[:200]
                 return None
             if r.status_code == 429:
                 time.sleep(5 * (i + 1))
                 continue
             r.raise_for_status()
             return r.json()
-        except requests.RequestException:
+        except requests.RequestException as e:
+            LAST["status"], LAST["error"] = None, str(e)[:200]
             time.sleep(2 * (i + 1))
     return None
 
 
+class DataError(RuntimeError):
+    pass
+
+
 def fetch_transactions(address, api_key, max_pages=10):
     """Cüzdanın SWAP işlemleri (en yeniden eskiye), Helius ayrıştırılmış biçimde."""
-    out, before = [], None
+    out, before, host = [], None, None
     for _ in range(max_pages):
         params = {"api-key": api_key, "type": "SWAP", "limit": 100}
         if before:
             params["before"] = before
-        page = _get(f"{HELIUS}/addresses/{address}/transactions", params)
+        page = None
+        for h in ([host] if host else HELIUS_HOSTS):
+            page = _get(f"{h}/addresses/{address}/transactions", params)
+            if page is not None:
+                host = h
+                break
+        if page is None:
+            if not out and LAST["status"] not in (200, 404):
+                raise DataError(f"Helius yanıtı: {LAST['status']} {LAST['error'] or ''}".strip())
+            break
         if not page:
             break
         out += page
