@@ -37,7 +37,7 @@ def test_calm_trader_scores_zero():
 def test_recent_trades_are_unmeasured_not_zero():
     px = daily([1.0] * 5)
     last = max(px)
-    r = analyze([Trade(last - HOUR, TOK, "sell", 10, 10), Trade(last - 2 * HOUR, TOK, "buy", 10, 10)], {TOK: px})
+    r = analyze([Trade(last - 1800, TOK, "sell", 10, 10), Trade(last - HOUR, TOK, "buy", 10, 10)], {TOK: px})
     assert r.unmeasured == 2 and r.score is None
     assert "yeterli veri yok" in card_text(ME, r)
 

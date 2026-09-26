@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 DAY = 86400
 HOUR = 3600
 WINDOW = 30 * DAY
-MIN_AFTER = 6 * HOUR          # bir işlemi değerlendirmek için sonrasında en az bu kadar veri
+MIN_AFTER = 2 * HOUR          # bir işlemi değerlendirmek için sonrasında en az bu kadar veri
 MIN_MISS = 0.10
 PANIC_DROP = 0.15
 FOMO_RISE = 0.30
@@ -158,7 +158,7 @@ def card_text(addr, r):
     else:
         lines.append(f"🧻 Kağıt el puanı: {r.score}/100")
     if r.unmeasured:
-        lines.append(f"({r.unmeasured} işlem çok yeni ya da fiyatı bulunamadı; değerlendirilmedi)")
+        lines.append(f"({r.unmeasured} işlem son 2 saatte yapıldı ya da fiyatı bulunamadı; değerlendirilmedi)")
     if r.worst:
         lines += ["", "En büyük pişmanlıklar:"]
         for miss, sym, p, hi in r.worst:
