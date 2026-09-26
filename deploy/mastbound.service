@@ -1,0 +1,17 @@
+[Unit]
+Description=Mastbound Telegram botu (Pişmanlık Aynası)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mastbound
+EnvironmentFile=/etc/mastbound.env
+ExecStart=/opt/mastbound/venv/bin/python -u -m mastbound.bot
+Restart=always
+RestartSec=30
+Nice=10
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
