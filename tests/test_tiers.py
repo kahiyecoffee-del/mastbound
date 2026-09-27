@@ -116,3 +116,47 @@ def test_legacy_pending_format(tmp_path):
     s.user(4)["pending"] = ["abc123", time.time()]
     msg = tiers.link_message(4, "abc123")
     assert s.finish_link(4, wallet, b58encode(k.sign(msg.encode()))) == "ok"
+
+
+def test_referral_bonus_rules(tmp_path):
+    s = tiers.Store(str(tmp_path / "u.json"))
+    assert s.register(1) and not s.register(1)                 # 1 artık bilinen kullanıcı
+    assert s.register(2)
+    assert s.add_referral(1, 2) and s.user(1)["bonus"] == tiers.REF_BONUS
+    assert not s.add_referral(1, 2)                            # aynı kişi ikinci kez sayılmaz
+    assert not s.add_referral(3, 3)                            # kendini davet
+    assert not s.add_referral(999, 4)                          # bilinmeyen davetçi
+    now = time.time()
+    assert s.take_card(1, "free", now)                          # günlük hak
+    for _ in range(tiers.REF_BONUS):
+        assert s.take_card(1, "free", now)                      # bonus kartlar
+    assert not s.take_card(1, "free", now)
+    s.d["_featured"] = [{"addr": "x", "label": ""}]
+    assert s.pro_users() == []                                  # "_" anahtarları atlanır
+
+
+def test_referral_daily_cap(tmp_path):
+    s = tiers.Store(str(tmp_path / "u.json"))
+    s.register(1)
+    got = sum(s.add_referral(1, 100 + i) for i in range(tiers.REF_DAILY_CAP + 5))
+    assert got == tiers.REF_DAILY_CAP
+
+
+def test_invite_and_feature_commands():
+    from tests.test_social import _bot
+    import os
+    b = _bot("/tmp/mb_test_users3.json")
+    priv = {"id": 1, "type": "private"}
+    b.handle({"chat": priv, "from": {"id": 1}, "text": "/invite"})
+    assert "start=ref_1" in b.out[-1]
+    os.environ["ADMIN_IDS"] = "1"
+    try:
+        b.handle({"chat": priv, "from": {"id": 1}, "text": "/feature add " + "7" * 43 + " Some Whale"})
+        assert b.store.d["_featured"][0]["label"] == "Some Whale"
+        b.handle({"chat": priv, "from": {"id": 1}, "text": "/feature list"})
+        assert "Some Whale" in b.out[-1]
+        n = len(b.out)
+        b.handle({"chat": {"id": 5, "type": "private"}, "from": {"id": 5}, "text": "/feature list"})
+        assert len(b.out) == n                                  # yönetici değil → sessiz
+    finally:
+        del os.environ["ADMIN_IDS"]

@@ -25,13 +25,13 @@ WELCOME = ("⚓ <b>Welcome aboard Mastbound</b>\n\n"
 PROMO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "promo.png")
 COMMANDS = [("regret", "Regret Mirror card for a wallet"), ("tier", "Your tier and limits"),
             ("link", "Link your wallet (unlock tiers)"), ("pact", "Ulysses Pact: promise not to sell"),
-            ("swap", "Swap on Solana via Jupiter"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
+            ("swap", "Swap on Solana via Jupiter"), ("invite", "Invite friends, earn bonus cards"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
             ("safety", "How to stay safe"), ("token", "$MBOUND info"), ("help", "All commands")]
 HELP = ("<b>Commands</b>\n/regret &lt;wallet&gt; — your Regret Mirror card (works in groups too)\n"
         "/details — trade-by-trade breakdown of your last card\n/tier — your tier and limits\n"
         "/link — link your wallet to unlock Standard / Pro\n"
         "/pact &lt;token&gt; &lt;days&gt; — Ulysses Pact: promise not to sell, get storm alerts\n/pacts — your pacts\n"
-        "/swap — swap via Jupiter\n/about — what Mastbound is\n"
+        "/swap — swap via Jupiter\n/invite — your invite link (+3 bonus cards per friend)\n/about — what Mastbound is\n"
         "/safety — how to stay safe\n/token — $MBOUND info\n\nIn a private chat you can also just paste a wallet address.")
 FAQ = {
     "/about": ("⚓ Mastbound is a behavioral mirror for crypto traders.\n\nThe Regret Mirror reads a Solana wallet's public swap "
@@ -133,10 +133,23 @@ class Bot:
                 return None
         if not private and not cmd:
             return None                         # grupta düz sohbete karışma
+        first = self.store.register(user) if private else False
         if cmd in ("/start", "/help"):
             if cmd == "/help":
                 return self.send(chat, HELP)
+            if first and len(words) > 1 and words[1].startswith("ref_") and words[1][4:].isdigit():
+                ref = int(words[1][4:])
+                if self.store.add_referral(ref, user):
+                    self.send(ref, f"🎉 A friend joined with your invite link — +{tiers.REF_BONUS} bonus cards!")
             return self.welcome(chat)
+        if cmd == "/invite":
+            u = self.store.user(user)
+            link = f"https://t.me/{self.username}?start=ref_{user}"
+            return self.send(chat, f"🔗 <b>Your invite link</b>\n{link}\n\nEvery friend who starts the bot with it gives you "
+                                   f"+{tiers.REF_BONUS} bonus cards (used when your daily limit runs out).\n"
+                                   f"Friends invited: {u.get('refs', 0)} · Bonus cards left: {u.get('bonus', 0)}")
+        if cmd == "/feature":
+            return self.feature_cmd(chat, user, words[1:], text)
         if cmd in FAQ:
             return self.send(chat, FAQ[cmd])
         if cmd == "/token":
@@ -179,8 +192,9 @@ class Bot:
             return self.send(chat, "Please wait a minute before the next analysis.")
         tier = self.store.tier(user)
         if not self.store.take_card(user, tier):
-            return self.send(chat, f"You've used today's free card. Hold $3 of $MBOUND and /link your wallet for "
-                                   f"{tiers.LIMITS['standard']['cards']} cards a day — or come back tomorrow. ⚓")
+            return self.send(chat, f"You've used today's cards. Hold $3 of $MBOUND and /link your wallet for "
+                                   f"{tiers.LIMITS['standard']['cards']} cards a day, /invite friends for bonus cards, "
+                                   "or come back tomorrow. ⚓")
         self.last[key] = time.time()
         self.send(chat, f"🔍 Analyzing… ({self.jobs.qsize()} ahead of you, may take 1-3 minutes)")
         self.jobs.put((chat, addr, user, tier))
@@ -295,9 +309,92 @@ class Bot:
                         self.send(int(uid), msg)
             time.sleep(3600)
 
+    @staticmethod
+    def is_admin(user):
+        return user in {int(x) for x in os.environ.get("ADMIN_IDS", "").replace(" ", "").split(",") if x}
+
+    def feature_cmd(self, chat, user, args, text):
+        """Yönetici: Paper Hand of the Day listesi. /feature add <cüzdan> [etiket] · list · del <n> · now"""
+        if not self.is_admin(user):
+            return None
+        lst = self.store.d.setdefault("_featured", [])
+        sub = args[0].lower() if args else "list"
+        if sub == "add" and len(args) >= 2 and ADDR.match(args[1]):
+            label = text.split(None, 3)[3] if len(args) > 2 else ""
+            lst.append({"addr": args[1], "label": label[:40]})
+            self.store.save()
+            return self.send(chat, f"Added #{len(lst)}. Only feature wallets that are publicly known / self-disclosed.")
+        if sub == "del" and len(args) == 2 and args[1].isdigit() and 1 <= int(args[1]) <= len(lst):
+            lst.pop(int(args[1]) - 1)
+            self.store.save()
+            return self.send(chat, "Removed.")
+        if sub == "now":
+            self.send(chat, "Posting the next featured wallet…")
+            threading.Thread(target=self.post_featured, args=(chat,), daemon=True).start()
+            return None
+        rows = [f"{i + 1}. <code>{e['addr'][:4]}…{e['addr'][-4:]}</code> {html.escape(e['label'])}" for i, e in enumerate(lst)]
+        return self.send(chat, "🧻 <b>Paper Hand of the Day list</b>\n" + ("\n".join(rows) or "empty") +
+                         "\n\n/feature add &lt;wallet&gt; [label] · /feature del &lt;n&gt; · /feature now")
+
+    def post_featured(self, report_to=None):
+        """Listeden sıradaki cüzdanın kartını kanala (ve X'e) gönderir; puanı olmayanları atlar."""
+        lst = self.store.d.get("_featured", [])
+        meta = self.store.d.setdefault("_meta", {})
+        ch = os.environ.get("TELEGRAM_CHANNEL_ID")
+        if not lst or not ch:
+            if report_to:
+                self.send(report_to, "Nothing to post: the list is empty or no channel is set.")
+            return False
+        for _ in range(min(3, len(lst))):
+            i = meta.get("feature_idx", 0) % len(lst)
+            meta["feature_idx"] = i + 1
+            self.store.save()
+            e = lst[i]
+            try:
+                r = wallet_report(e["addr"], self.helius)
+            except Exception as ex:
+                print(f"featured hata {e['addr']}: {ex}", flush=True)
+                continue
+            if r.score is None:
+                continue
+            title, _ = persona(r.score)
+            who = e["label"] or f"{e['addr'][:4]}…{e['addr'][-4:]}"
+            text = (f"🧻 Paper Hand of the Day: {who}\n{title} — Paper Hands Score {r.score}/100 · "
+                    f"missed {compact_usd(r.missed_usd)} by selling early.\n\n"
+                    f"Check your own: @{self.username}\nNot financial advice.")
+            png = render(e["addr"], r, self.username)
+            tg = social.Telegram(self.api.rsplit("/bot", 1)[1])
+            ok = tg.post(ch, text, png)
+            x = social.XClient.from_env()
+            if x:
+                try:
+                    x.post(text[:280], png=png)
+                except Exception as ex:
+                    print(f"featured X hatası: {ex}", flush=True)
+            if report_to:
+                self.send(report_to, "Posted ✓" if ok else f"Channel post failed: {html.escape(tg.error or '?')}")
+            return ok
+        if report_to:
+            self.send(report_to, "No scorable wallet found in the next entries.")
+        return False
+
+    def featured_daily(self):
+        hour = int(os.environ.get("FEATURE_HOUR", "15"))
+        while True:
+            try:
+                t = time.gmtime()
+                day = time.strftime("%Y-%m-%d", t)
+                meta = self.store.d.setdefault("_meta", {})
+                if t.tm_hour >= hour and meta.get("feature_day") != day and self.store.d.get("_featured"):
+                    meta["feature_day"] = day
+                    self.store.save()
+                    self.post_featured()
+            except Exception as ex:
+                print(f"featured döngü hatası: {ex}", flush=True)
+            time.sleep(600)
+
     def announce(self, chat, user, text):
-        admins = {int(x) for x in os.environ.get("ADMIN_IDS", "").replace(" ", "").split(",") if x}
-        if user not in admins:
+        if not self.is_admin(user):
             return None
         if not text:
             return self.send(chat, "Usage: /announce &lt;text&gt; — posts to the channel and X with a branded image.")
@@ -375,6 +472,7 @@ class Bot:
         threading.Thread(target=self.worker, daemon=True).start()
         threading.Thread(target=self.weekly, daemon=True).start()
         threading.Thread(target=self.check_pacts, daemon=True).start()
+        threading.Thread(target=self.featured_daily, daemon=True).start()
         offset = None
         while True:
             try:

@@ -28,6 +28,8 @@ LIMITS = {  # günlük kart, analiz edilen geçmiş (gün, None = tümü), işle
     "standard": {"cards": 10, "days": 90, "details": True, "weekly": False},
     "pro": {"cards": None, "days": None, "details": True, "weekly": True},
 }
+REF_BONUS = 3          # davet başına ek kart
+REF_DAILY_CAP = 10     # günde en fazla bu kadar davet ödüllendirilir (sahte hesap istismarına karşı)
 GRACE = 0.9            # kademesi olan kullanıcı, fiyat dalgalanmasında eşiğin %90'ına kadar kademesini korur
 RECHECK = 24 * 3600
 NONCE_TTL = 15 * 60
@@ -196,10 +198,43 @@ class Store:
         if u.get("day") != day:
             u["day"], u["cards"] = day, 0
         if limit is not None and u["cards"] >= limit:
+            if u.get("bonus", 0) > 0:          # davet ödülü kartları günlük sınırı aşar
+                u["bonus"] -= 1
+                self.save()
+                return True
             return False
         u["cards"] += 1
         self.save()
         return True
 
+    def register(self, uid, now=None):
+        """Kullanıcıyı ilk kez görüyorsak True (davet ödülü yalnız yeni kullanıcı için)."""
+        u = self.user(uid)
+        if any(k in u for k in ("seen", "day", "wallet", "linked_at")):
+            u.setdefault("seen", int(now or time.time()))
+            return False
+        u["seen"] = int(now or time.time())
+        self.save()
+        return True
+
+    def add_referral(self, ref, new, now=None):
+        """Davet eden kullanıcıya REF_BONUS kart; kendini davet, tekrar ve günlük REF_DAILY_CAP üstü sayılmaz."""
+        if str(ref) == str(new) or str(ref) not in self.d or self.user(new).get("referred_by"):
+            return False
+        day = time.strftime("%Y-%m-%d", time.gmtime(now or time.time()))
+        r = self.user(ref)
+        if r.get("ref_day") != day:
+            r["ref_day"], r["ref_today"] = day, 0
+        self.user(new)["referred_by"] = int(ref)
+        if r["ref_today"] >= REF_DAILY_CAP:
+            self.save()
+            return False
+        r["ref_today"] += 1
+        r["refs"] = r.get("refs", 0) + 1
+        r["bonus"] = r.get("bonus", 0) + REF_BONUS
+        self.save()
+        return True
+
     def pro_users(self):
-        return [int(k) for k, u in self.d.items() if u.get("wallet") and u.get("tier") == "pro"]
+        return [int(k) for k, u in self.d.items()
+                if not k.startswith("_") and u.get("wallet") and u.get("tier") == "pro"]
