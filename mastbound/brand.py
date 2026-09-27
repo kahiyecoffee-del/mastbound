@@ -79,6 +79,53 @@ def promo():
     return img.convert("RGB")
 
 
+def _wrap(d, text, font, width):
+    lines = []
+    for para in text.split("\n"):
+        cur = ""
+        for w in para.split():
+            t = f"{cur} {w}".strip()
+            if d.textlength(t, font=font) <= width:
+                cur = t
+            else:
+                lines.append(cur)
+                cur = w
+        lines.append(cur)
+    return lines
+
+
+def post_image(text, bot=None, headline=None):
+    """Kanal/X gönderisi için markalı görsel (1200×675): ilk paragraf büyük başlık olarak."""
+    w, h = 1200, 675
+    img = _canvas(w, h, [((w - 600, -300, w + 200, 400), (240, 196, 92, 60)), ((-300, 300, 400, 1000), (40, 120, 200, 45))])
+    d = ImageDraw.Draw(img)
+    img.alpha_composite(_logo(60), (64, 52))
+    _tracked(d, (140, 58), "MASTBOUND", _font(28, "black"), INK, 3)
+    _tracked(d, (142, 94), "TIE YOURSELF TO THE MAST", _font(14, "medium"), GOLD, 2.6)
+    head = (headline or text).replace("{bot}", f"@{bot}" if bot else "Mastbound").split("\n\n")[0]
+    head = "".join(ch for ch in head if ord(ch) < 0x2000 or 0x2010 <= ord(ch) <= 0x206F).strip()   # emoji yok
+    for size in (60, 52, 46, 40, 34):
+        f = _font(size, "black")
+        lines = _wrap(d, head, f, w - 160)
+        if len(lines) * size * 1.25 <= 400:
+            break
+    y = 170 + (400 - len(lines) * size * 1.25) / 2
+    d.rectangle([64, y + 6, 70, y + len(lines) * size * 1.25 - 14], fill=GOLD)
+    for ln in lines:
+        d.text((96, y), ln, font=f, fill=INK)
+        y += size * 1.25
+    foot = f"@{bot} on Telegram" if bot else "Regret Mirror · read-only · no keys"
+    d.text((64, h - 70), foot, font=_font(24, "medium"), fill=GOLD)
+    return img.convert("RGB")
+
+
+def png_bytes(img):
+    import io
+    buf = io.BytesIO()
+    img.save(buf, "PNG", optimize=True)
+    return buf.getvalue()
+
+
 def main():
     os.makedirs(ASSETS, exist_ok=True)
     banner_x().convert("RGB").save(os.path.join(ASSETS, "banner_x.png"), optimize=True)

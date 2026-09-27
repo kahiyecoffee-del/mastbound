@@ -167,11 +167,18 @@ class Scheduler:
         self.state.d["last_slot"] = slot
         self.state.save()                     # önce kaydet: hata olsa bile aynı gönderi iki kez gitmez
         text = p["text"].replace("{bot}", self.bot_ref)
+        png = None
+        try:
+            from .brand import png_bytes, post_image
+            png = png_bytes(post_image(p["text"], self.bot_ref.lstrip("@") if self.bot_ref.startswith("@") else None,
+                                       p.get("headline")))
+        except Exception as e:                # görsel olmazsa metinle devam
+            print(f"gönderi görseli üretilemedi: {e}", flush=True)
         if self.tg and self.channel:
-            self.tg.post(self.channel, (p.get("telegram") or p["text"]).replace("{bot}", self.bot_ref))
+            self.tg.post(self.channel, (p.get("telegram") or p["text"]).replace("{bot}", self.bot_ref), png)
         if self.x:
             try:
-                self.x.post(text)
+                self.x.post(text, png=png)
             except Exception as e:
                 print(f"X paylaşım hatası: {e}", flush=True)
         print(f"paylaşıldı [{slot}]: {text[:60]}", flush=True)

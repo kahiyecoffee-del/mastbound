@@ -39,7 +39,8 @@ def test_scheduler_posts_once_per_slot(tmp_path):
     assert s.tick(day + 18 * 3600) is None          # aynı dilim
     assert s.tick(day + 19 * 3600 + 60)["text"] == "a {bot}"
     assert s.tick(day + 20 * 3600) is None
-    assert tg.sent[0][0] == ("@chan", "a @MBot") and x.sent[0][0] == ("a @MBot",)
+    assert tg.sent[0][0][:2] == ("@chan", "a @MBot") and x.sent[0][0] == ("a @MBot",)
+    assert tg.sent[0][0][2][:4] == b"\x89PNG" and x.sent[0][1]["png"][:4] == b"\x89PNG"
     assert social.State(str(tmp_path / "s.json")).d["post_index"] == 1
 
 
