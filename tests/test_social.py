@@ -99,13 +99,13 @@ def test_group_commands():
     b.handle({"chat": grp, "from": {"id": 1}, "text": "/safety"})
     assert "seed phrase" in b.out[-1]
     b.handle({"chat": grp, "from": {"id": 1}, "text": "/token"})
-    assert "not launched" in b.out[-1]
+    assert "5kUBehRwaa9nFxXz5uZr7PytFree4mJjS9cMGhBKBAGS" in b.out[-1]
 
 
 def test_private_plain_address():
     b = _bot()
     b.handle({"chat": {"id": 9, "type": "private"}, "from": {"id": 9}, "text": "7" * 43})
-    assert b.jobs.get_nowait() == (9, "7" * 43, 9, "standard")   # lansman öncesi herkes Standard
+    assert b.jobs.get_nowait() == (9, "7" * 43, 9, "free")   # cüzdan bağlı değil → Free
 
 
 def test_card_with_qr_and_caption():

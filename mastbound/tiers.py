@@ -5,7 +5,7 @@ Akış: /link → bot tek kullanımlık mesaj üretir → kullanıcı GitHub Pag
 Bakiye günde bir yeniden kontrol edilir.
 
 Ortam değişkenleri:
-  MBOUND_MINT             token mint adresi (yoksa herkes PRELAUNCH_TIER kademesinde)
+  MBOUND_MINT             token mint adresi (varsayılan: resmi $MBOUND; boş = herkes PRELAUNCH_TIER)
   PRELAUNCH_TIER          token çıkmadan önceki kademe (varsayılan: standard)
   SOLANA_RPC              RPC adresi (varsayılan: Helius mainnet; devnet testi için devnet adresi)
   MBOUND_TEST_PRICE_USD   sabit test fiyatı (devnet'te piyasa fiyatı yoktur)
@@ -21,6 +21,7 @@ from urllib.parse import quote
 
 import requests
 
+OFFICIAL_MINT = "5kUBehRwaa9nFxXz5uZr7PytFree4mJjS9cMGhBKBAGS"   # $MBOUND (Bags)
 TIERS = ("free", "standard", "pro")
 LIMITS = {  # günlük kart, analiz edilen geçmiş (gün, None = tümü), işlem dökümü, haftalık rapor
     "free": {"cards": 1, "days": 30, "details": False, "weekly": False},
@@ -33,6 +34,11 @@ NONCE_TTL = 15 * 60
 SITE = os.environ.get("SITE_URL", "https://kahiyecoffee-del.github.io/mastbound/")
 VERIFY_PAGE = os.environ.get("VERIFY_PAGE", SITE + "verify/")
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def official_mint():
+    """$MBOUND mint adresi; MBOUND_MINT ortam değişkeni ile değiştirilebilir (boş = lansman öncesi modu)."""
+    return os.environ.get("MBOUND_MINT", OFFICIAL_MINT) or None
 
 
 def b58decode(s):
@@ -166,7 +172,7 @@ class Store:
 
     def tier(self, uid, force=False, now=None):
         """Kademe (gerekirse bakiyeyi yeniden kontrol eder). Token yoksa herkes PRELAUNCH_TIER."""
-        mint = os.environ.get("MBOUND_MINT")
+        mint = official_mint()
         if not mint:
             return os.environ.get("PRELAUNCH_TIER", "standard")
         u = self.user(uid)

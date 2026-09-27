@@ -216,7 +216,7 @@ class Bot:
         if u.get("wallet"):
             w = u["wallet"]
             lines.append(f"Wallet: <code>{w[:4]}…{w[-4:]}</code>" + (f" · $MBOUND held ≈ ${u['usd']:,.2f}" if "usd" in u else ""))
-        elif os.environ.get("MBOUND_MINT"):
+        elif tiers.official_mint():
             lines.append("No wallet linked — /link to unlock Standard or Pro.")
         else:
             lines.append("Pre-launch: everyone gets Standard until $MBOUND launches.")
@@ -410,12 +410,14 @@ def html_caption(addr, r):
 
 
 def token_info():
-    mint = os.environ.get("MBOUND_MINT")
+    mint = tiers.official_mint()
     if not mint:
         return ("$MBOUND has not launched yet. The official contract address will be posted here (/token) and on our "
                 "official channels only. Any 'MBOUND' token you see before that is fake.")
-    return (f"$MBOUND official contract address:\n<code>{mint}</code>\n\nAlways verify it here before buying. "
-            "Holding $MBOUND unlocks Standard / Pro features. Not financial advice.")
+    return (f"🪙 <b>$MBOUND</b> official contract address:\n<code>{mint}</code>\n\n"
+            f"Chart &amp; trade on Bags: https://bags.fm/{mint}\n\n"
+            "Always verify the address here before buying — anyone DMing you a different one is a scammer.\n"
+            "Hold $3 → Standard · $25 → Pro. Not financial advice.")
 
 
 def x_reply(addr, helius, bot=None):

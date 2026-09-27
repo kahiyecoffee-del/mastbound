@@ -12,7 +12,7 @@ Read-only. Your keys never leave your wallet.
 
 ## Launch · contract address
 $MBOUND is live on Bags.
-Official CA: {mint}
+Official CA: 5kUBehRwaa9nFxXz5uZr7PytFree4mJjS9cMGhBKBAGS
 Verify it in @Mastboundbot with /token before you buy. Anyone DMing you a different address is a scammer.
 Not financial advice.
 

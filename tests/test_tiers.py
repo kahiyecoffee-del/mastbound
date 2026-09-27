@@ -73,7 +73,7 @@ def test_tier_from_balance_and_daily_recheck(tmp_path, monkeypatch):
 
 
 def test_prelaunch_and_daily_card_limit(tmp_path, monkeypatch):
-    monkeypatch.delenv("MBOUND_MINT", raising=False)
+    monkeypatch.setenv("MBOUND_MINT", "")                                              # lansman öncesi modu
     s = tiers.Store(str(tmp_path / "u.json"))
     assert s.tier(5) == "standard"
     now = time.time()
@@ -86,6 +86,7 @@ def test_details_command():
     from tests.test_social import _bot
     b = _bot("/tmp/mb_test_users2.json")
     r = Report(events=[(1700000000, "panic", "WIF", 1.5, 2.0), (1700003600, "fomo", "BONK<x>", 0.00002, 0.00001)])
+    b.store.tier = lambda uid, **k: "standard"
     b.reports[3] = ("7" * 43, r)
     b.details(3, 3)
     assert "Panic sell" in b.out[-1] and "BONK&lt;x&gt;" in b.out[-1]

@@ -25,6 +25,11 @@
   .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-top:32px; }
   .tile { border:1px solid var(--line); border-radius:16px; padding:18px; background:rgba(255,255,255,.02); }
   .tile b { display:block; margin-bottom:4px; } .tile span { color:var(--ink2); font-size:15px; }
+  .ca { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:22px 0 4px; padding:12px 14px; border:1px solid var(--line);
+        border-radius:12px; background:rgba(255,255,255,.03); }
+  .ca span { color:var(--gold); font-size:12px; letter-spacing:.14em; font-weight:700; }
+  .ca code { color:var(--ink2); font:13px ui-monospace, Menlo, monospace; word-break:break-all; flex:1; min-width:200px; }
+  .ca button { background:var(--gold); border:0; border-radius:8px; padding:8px 14px; font-weight:700; cursor:pointer; }
   .cta.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); margin-left:8px; }
   footer { margin-top:40px; color:var(--ink3); font-size:14px; }
 </style>
@@ -34,7 +39,10 @@
   <header><img src="logo.png" alt=""><div><div class="brand">MASTBOUND</div><div class="sub">TIE YOURSELF TO THE MAST</div></div></header>
   <h1>What did your <span>paper hands</span> cost you?</h1>
   <p class="lead">The Regret Mirror reads any Solana wallet's public swap history and measures early sells, panic sells and FOMO buys — with a Paper Hands Score from 0 to 100.</p>
-  <a class="cta" href="https://t.me/Mastboundbot">Open the bot on Telegram</a>
+  <div class="ca"><span>$MBOUND CA</span><code id="ca">5kUBehRwaa9nFxXz5uZr7PytFree4mJjS9cMGhBKBAGS</code>
+    <button onclick="navigator.clipboard.writeText(document.getElementById('ca').textContent);this.textContent='Copied ✓'">Copy</button></div>
+  <a class="cta" href="https://bags.fm/5kUBehRwaa9nFxXz5uZr7PytFree4mJjS9cMGhBKBAGS">Buy on Bags</a>
+  <a class="cta ghost" href="https://t.me/Mastboundbot">Open the bot</a>
   <a class="cta ghost" href="swap/">Swap</a>
   <img class="hero" src="promo.png" alt="Regret Mirror card">
   <div class="grid">
