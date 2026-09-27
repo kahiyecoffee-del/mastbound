@@ -12,6 +12,12 @@ setkey() {  # setkey AD DEĞER  → varsa değiştir, yoksa ekle
   mv "$ENV.tmp" "$ENV"
 }
 read -rp "Telegram kanalı (ör. @mastbound_news, boş = değiştirme): " CH
+CH="${CH#https://}"; CH="${CH#http://}"; CH="${CH#t.me/}"; CH="${CH%/}"
+if [ -n "$CH" ]; then
+  case "$CH" in *" "*) echo "Kanal adı boşluk içeremez: kanalın KULLANICI ADINI yazın (ör. @mastbound), görünen adını değil."; exit 1 ;; esac
+  case "$CH" in @*|-*) ;; *) CH="@$CH" ;; esac
+  echo "Kanal: $CH"
+fi
 read -rp "Paylaşım saatleri UTC (ör. 13,19; boş = 13,19): " HRS
 read -rsp "X API Key (boş = X yok/değiştirme): " XK; echo
 if [ -n "$XK" ]; then
