@@ -30,7 +30,8 @@ LIMITS = {  # günlük kart, analiz edilen geçmiş (gün, None = tümü), işle
 GRACE = 0.9            # kademesi olan kullanıcı, fiyat dalgalanmasında eşiğin %90'ına kadar kademesini korur
 RECHECK = 24 * 3600
 NONCE_TTL = 15 * 60
-VERIFY_PAGE = os.environ.get("VERIFY_PAGE", "https://kahiyecoffee-del.github.io/mastbound/verify/")
+SITE = os.environ.get("SITE_URL", "https://kahiyecoffee-del.github.io/mastbound/")
+VERIFY_PAGE = os.environ.get("VERIFY_PAGE", SITE + "verify/")
 B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
@@ -98,6 +99,10 @@ def token_balance(wallet, mint):
 def token_price(mint):
     if os.environ.get("MBOUND_TEST_PRICE_USD"):
         return float(os.environ["MBOUND_TEST_PRICE_USD"])
+    return market_price(mint)
+
+
+def market_price(mint):
     j = requests.get(f"https://api.geckoterminal.com/api/v2/simple/networks/solana/token_price/{mint}",
                      timeout=30).json()
     return float(((j.get("data") or {}).get("attributes") or {}).get("token_prices", {}).get(mint) or 0)

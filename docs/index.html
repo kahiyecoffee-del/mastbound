@@ -25,6 +25,7 @@
   .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-top:32px; }
   .tile { border:1px solid var(--line); border-radius:16px; padding:18px; background:rgba(255,255,255,.02); }
   .tile b { display:block; margin-bottom:4px; } .tile span { color:var(--ink2); font-size:15px; }
+  .cta.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); margin-left:8px; }
   footer { margin-top:40px; color:var(--ink3); font-size:14px; }
 </style>
 </head>
@@ -34,11 +35,13 @@
   <h1>What did your <span>paper hands</span> cost you?</h1>
   <p class="lead">The Regret Mirror reads any Solana wallet's public swap history and measures early sells, panic sells and FOMO buys — with a Paper Hands Score from 0 to 100.</p>
   <a class="cta" href="https://t.me/Mastboundbot">Open the bot on Telegram</a>
+  <a class="cta ghost" href="swap/">Swap</a>
   <img class="hero" src="promo.png" alt="Regret Mirror card">
   <div class="grid">
     <div class="tile"><b>Read-only</b><span>No wallet connect, no transactions. Never a seed phrase or private key.</span></div>
     <div class="tile"><b>Free · Standard · Pro</b><span>Hold $3 or $25 of $MBOUND to unlock more cards, deeper history and weekly reports.</span></div>
-    <div class="tile"><b>Ulysses Lock</b><span>Coming next: commit to your plan before the storm.</span></div>
+    <div class="tile"><b>Ulysses Pact</b><span>Promise not to sell, get a storm alert when it dips. Funds never leave your wallet.</span></div>
+    <div class="tile"><b>Swap</b><span>Best route via Jupiter with a 0.25% Mastbound fee. Your wallet signs every swap.</span></div>
   </div>
   <footer>Not financial advice. Mastbound measures past on-chain behavior only.</footer>
 </main>

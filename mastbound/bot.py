@@ -12,7 +12,7 @@ import time
 
 import requests
 
-from . import social, tiers
+from . import pact, social, tiers
 from .analysis import card_text
 from .card import compact_usd, fmt_price, persona, render
 from .chain import DataError, wallet_report
@@ -24,11 +24,14 @@ WELCOME = ("⚓ <b>Welcome aboard Mastbound</b>\n\n"
            "🔒 Read-only. No wallet connect, no signatures. We will <b>never</b> ask for a seed phrase or private key.")
 PROMO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "promo.png")
 COMMANDS = [("regret", "Regret Mirror card for a wallet"), ("tier", "Your tier and limits"),
-            ("link", "Link your wallet (unlock tiers)"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
+            ("link", "Link your wallet (unlock tiers)"), ("pact", "Ulysses Pact: promise not to sell"),
+            ("swap", "Swap on Solana via Jupiter"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
             ("safety", "How to stay safe"), ("token", "$MBOUND info"), ("help", "All commands")]
 HELP = ("<b>Commands</b>\n/regret &lt;wallet&gt; — your Regret Mirror card (works in groups too)\n"
         "/details — trade-by-trade breakdown of your last card\n/tier — your tier and limits\n"
-        "/link — link your wallet to unlock Standard / Pro\n/about — what Mastbound is\n"
+        "/link — link your wallet to unlock Standard / Pro\n"
+        "/pact &lt;token&gt; &lt;days&gt; — Ulysses Pact: promise not to sell, get storm alerts\n/pacts — your pacts\n"
+        "/swap — swap via Jupiter\n/about — what Mastbound is\n"
         "/safety — how to stay safe\n/token — $MBOUND info\n\nIn a private chat you can also just paste a wallet address.")
 FAQ = {
     "/about": ("⚓ Mastbound is a behavioral mirror for crypto traders.\n\nThe Regret Mirror reads a Solana wallet's public swap "
@@ -64,10 +67,10 @@ class Bot:
 
     def keyboard(self):
         rows = [[{"text": "🧭 How it works", "callback_data": "/about"}, {"text": "🔐 Safety", "callback_data": "/safety"}],
-                [{"text": "🪙 $MBOUND", "callback_data": "/token"}]]
+                [{"text": "🪙 $MBOUND", "callback_data": "/token"}, {"text": "🔁 Swap", "url": tiers.SITE + "swap/"}]]
         ch = os.environ.get("TELEGRAM_CHANNEL_ID", "")
         if ch.startswith("@"):
-            rows[1].append({"text": "📣 Channel", "url": f"https://t.me/{ch[1:]}"})
+            rows.append([{"text": "📣 Channel", "url": f"https://t.me/{ch[1:]}"}])
         return {"inline_keyboard": rows}
 
     def send(self, chat, text, markup=None):
@@ -151,6 +154,20 @@ class Bot:
             return self.send(chat, self.tier_text(user))
         if cmd == "/details":
             return self.details(chat, user)
+        if cmd == "/swap":
+            return self.send(chat, "🔁 Swap any Solana token through Jupiter's best route. Your wallet signs every swap; "
+                                   "Mastbound never holds funds.",
+                             {"inline_keyboard": [[{"text": "🔁 Open swap", "url": tiers.SITE + "swap/"}]]})
+        if cmd == "/pact":
+            if not private:
+                return self.send(chat, "Pacts are personal — send /pact in a private chat with me.")
+            return self.make_pact(chat, user, words[1:])
+        if cmd == "/pacts":
+            lines = pact.summary(self.store.user(user).get("pacts", []))
+            return self.send(chat, "\n".join(["⛓ <b>Your Ulysses Pacts</b>", ""] + lines) if lines
+                             else "No pacts yet. /pact &lt;token address&gt; &lt;days&gt; to tie yourself to the mast.")
+        if cmd == "/announce":
+            return self.announce(chat, user, text[len(words[0]):].strip())
         if cmd and cmd != "/regret":
             return None if not private else self.send(chat, HELP)
         addr = words[-1] if words else ""
@@ -230,6 +247,75 @@ class Bot:
             lines.append(f"\n…and {len(r.events) - 15} more.")
         self.send(chat, "\n".join(lines))
 
+    def make_pact(self, chat, user, args):
+        from .chain import symbol_of
+        u = self.store.user(user)
+        if not u.get("wallet"):
+            return self.send(chat, "Link your wallet first with /link — the pact watches your own balance.")
+        if len(args) != 2 or not ADDR.match(args[0]) or not args[1].isdigit() or not 1 <= int(args[1]) <= 365:
+            return self.send(chat, "Usage: /pact &lt;token address&gt; &lt;days 1-365&gt;\n"
+                                   "Example: /pact EPjF…Dt1v 30 — I won't sell this token for 30 days.")
+        tier = self.store.tier(user)
+        active = [p for p in u.get("pacts", []) if p["status"] == "active"]
+        if len(active) >= pact.MAX_ACTIVE[tier]:
+            return self.send(chat, f"Your {tier.capitalize()} tier allows {pact.MAX_ACTIVE[tier]} active pact(s).")
+        try:
+            bal = tiers.token_balance(u["wallet"], args[0])
+            price = tiers.market_price(args[0])
+            sym = symbol_of(args[0])
+        except Exception as e:
+            print(f"pact hatası: {e}", flush=True)
+            return self.send(chat, "Couldn't read that token right now, please try again.")
+        if bal <= 0:
+            return self.send(chat, "Your linked wallet doesn't hold this token.")
+        p = pact.new_pact(args[0], sym, int(args[1]), price, bal)
+        u.setdefault("pacts", []).append(p)
+        self.store.save()
+        until = time.strftime("%b %d, %Y", time.gmtime(p["end"]))
+        self.send(chat, f"⛓ <b>Tied to the mast.</b>\nYou promised not to sell <b>{html.escape(sym)}</b> until {until}.\n\n"
+                        "I'll check every hour. If a storm hits (−15%), I'll remind you of this moment. "
+                        "Your funds stay in your wallet — this is a promise, not a lock.")
+
+    def check_pacts(self):
+        while True:
+            for uid, u in list(self.store.d.items()):
+                if uid.startswith("_") or not u.get("wallet"):
+                    continue
+                for p in u.get("pacts", []):
+                    if p["status"] != "active":
+                        continue
+                    try:
+                        msg = pact.evaluate(p, time.time(), tiers.market_price(p["mint"]),
+                                            tiers.token_balance(u["wallet"], p["mint"]))
+                    except Exception as e:
+                        print(f"pact kontrol hatası {uid}: {e}", flush=True)
+                        continue
+                    if msg:
+                        self.store.save()
+                        self.send(int(uid), msg)
+            time.sleep(3600)
+
+    def announce(self, chat, user, text):
+        admins = {int(x) for x in os.environ.get("ADMIN_IDS", "").replace(" ", "").split(",") if x}
+        if user not in admins:
+            return None
+        if not text:
+            return self.send(chat, "Usage: /announce &lt;text&gt; — posts to the channel and X with a branded image.")
+        from .brand import png_bytes, post_image
+        png = png_bytes(post_image(text, self.username))
+        done = []
+        ch = os.environ.get("TELEGRAM_CHANNEL_ID")
+        if ch and social.Telegram(self.api.rsplit("/bot", 1)[1]).post(ch, text, png):
+            done.append("Telegram")
+        x = social.XClient.from_env()
+        if x:
+            try:
+                x.post(text[:280], png=png)
+                done.append("X")
+            except Exception as e:
+                print(f"duyuru X hatası: {e}", flush=True)
+        self.send(chat, "📣 Posted to: " + (", ".join(done) or "nothing (check channel / X settings)"))
+
     def weekly(self):
         """Pro kullanıcılara pazartesi 09:00 UTC'den sonra haftalık kart."""
         while True:
@@ -276,6 +362,7 @@ class Bot:
     def run(self):
         threading.Thread(target=self.worker, daemon=True).start()
         threading.Thread(target=self.weekly, daemon=True).start()
+        threading.Thread(target=self.check_pacts, daemon=True).start()
         offset = None
         while True:
             try:
@@ -315,7 +402,7 @@ def token_info():
     if not mint:
         return ("$MBOUND has not launched yet. The official contract address will be posted here (/token) and on our "
                 "official channels only. Any 'MBOUND' token you see before that is fake.")
-    return (f"$MBOUND official contract address:\n{mint}\n\nAlways verify it here before buying. "
+    return (f"$MBOUND official contract address:\n<code>{mint}</code>\n\nAlways verify it here before buying. "
             "Holding $MBOUND unlocks Standard / Pro features. Not financial advice.")
 
 
