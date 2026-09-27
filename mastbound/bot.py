@@ -125,13 +125,21 @@ class Bot:
             try:
                 r = requests.get(f"{self.api}/getUpdates", params={"timeout": 50, "offset": offset},
                                  timeout=60).json()
-            except (requests.RequestException, ValueError):
+            except (requests.RequestException, ValueError) as e:
+                print(f"getUpdates bağlantı hatası: {e}", flush=True)
                 time.sleep(5)
+                continue
+            if not r.get("ok"):                 # ör. 409: aynı token'la ikinci bir bot çalışıyor; 401: token geçersiz
+                print(f"getUpdates hatası: {r.get('error_code')} {r.get('description')}", flush=True)
+                time.sleep(15)
                 continue
             for u in r.get("result", []):
                 offset = u["update_id"] + 1
                 if "message" in u:
-                    self.handle(u["message"])
+                    try:
+                        self.handle(u["message"])
+                    except Exception as e:      # tek bir mesaj botu düşürmesin
+                        print(f"mesaj işleme hatası: {type(e).__name__}: {e}", flush=True)
 
 
 def token_info():
@@ -162,6 +170,7 @@ def main():
     token, helius = os.environ["TELEGRAM_BOT_TOKEN"], os.environ["HELIUS_API_KEY"]
     bot = Bot(token, helius)
     social.start_from_env(token, lambda a: x_reply(a, helius), bot.fetch_username())
+    print(f"bot başladı: @{bot.username}", flush=True)
     bot.run()
 
 
