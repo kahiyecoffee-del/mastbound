@@ -105,3 +105,15 @@ def test_panic_needs_real_recovery():
     px = daily([1.0, 0.9, 0.8, 0.8, 0.82, 0.84] + [0.8] * 5)
     r = analyze([Trade(T0 + 3 * DAY, TOK, "sell", 10, 8)], {TOK: px})   # küçük kıpırtı panik değil
     assert r.panic_sells == 0
+
+
+def test_profitable_scalper_is_not_panic_or_fomo():
+    # yeni token: 1.0 → 3.0 → 2.0 → 2.6 ... kârla satıp geri alan kişi panik sayılmaz;
+    # alımdan sonra %10+ yükselen alım FOMO sayılmaz
+    seq = [1.0] * 6 + [2.0, 3.0, 2.4, 2.0, 2.2, 2.6, 2.8, 2.5] + [2.5] * 10
+    px = {T0 + h * HOUR: p for h, p in enumerate(seq)}
+    trades = [Trade(T0 + 6 * HOUR, TOK, "buy", 10, 20),            # 2.0'dan aldı (dibin %100 üstü)
+              Trade(T0 + 9 * HOUR, TOK, "sell", 10, 20),           # 2.0'dan sattı (zirvenin %33 altı, kârsız)
+              Trade(T0 + 10 * HOUR, TOK, "buy", 10, 22)]           # hemen geri aldı
+    r = analyze(trades, {TOK: px})
+    assert r.panic_sells == 0 and r.fomo_buys == 0

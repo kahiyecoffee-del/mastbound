@@ -6,9 +6,9 @@ Seri karışık çözünürlükte olabilir (son günler saatlik, eskisi günlük
 Tanımlar (hepsi yalnız o işlemden SONRAKİ fiyatla ölçülür):
   erken satış  : satıştan sonraki WINDOW içinde görülen en yüksek fiyat satış fiyatının en az %MIN_MISS üstüne
                  çıktıysa, kaçırılan = (en yüksek − satış fiyatı) × satılan miktar
-  panik satış  : satış fiyatı önceki 3 günün zirvesinin ≥ %PANIC_DROP altında ve 7 gün içinde fiyat satış
-                 fiyatının en az %MIN_MISS üstüne dönmüş
-  FOMO alım    : alım fiyatı önceki 3 günün dibinin ≥ %FOMO_RISE üstünde ve sonrasında fiyat, alımın %MIN_MISS
+  panik satış  : zararına satış; satış fiyatı önceki 3 günün zirvesinin ≥ %PANIC_DROP altında, geri alım yok
+                 ve 7 gün içinde fiyat satış fiyatının en az %MIN_MISS üstüne dönmüş
+  FOMO alım    : alım fiyatı önceki 3 günün dibinin ≥ %FOMO_RISE üstünde ve sonraki 7 günde fiyat alımın %MIN_MISS
                  üstüne hiç çıkmadan %FOMO_FALL altına inmiş (tepeden alım)
   Önceki 3 gün, en az MIN_BEFORE kadar fiyat geçmişi varsa kullanılır (yeni çıkmış token'lar da ölçülür).
   ölçülemedi   : işlemden sonra yeterli fiyat verisi yok (çok yeni işlem ya da fiyat bulunamadı)
@@ -122,6 +122,7 @@ def analyze(trades, prices):
             continue
         r.sells += 1
         c = cost.get(t.mint)
+        pnl = None
         if c and c[0] > 0:
             avg = c[1] / c[0]
             q = min(t.amount, c[0])
@@ -136,6 +137,7 @@ def analyze(trades, prices):
             continue
         r.measured += 1
         hi = max(after)
+        left = 0.0
         if hi >= t.price * (1 + MIN_MISS):
             left = t.amount
             for b in rebuy.get(t.mint, []):
@@ -155,7 +157,9 @@ def analyze(trades, prices):
                 a[3] += left
                 a[4] = max(a[4], hi)
                 a[5] += 1
-        if pre and t.price <= max(pre) * (1 - PANIC_DROP) and week and max(week) >= t.price * (1 + MIN_MISS):
+        # panik: düşüşte ZARARINA sattı, geri almadı ve fiyat 7 gün içinde toparlandı
+        if (pre and t.price <= max(pre) * (1 - PANIC_DROP) and left > 0 and (pnl is None or pnl < 0)
+                and week and max(week) >= t.price * (1 + MIN_MISS)):
             r.panic_sells += 1
     r.tokens = len({t.mint for t in trades})
     r.worst = sorted(((a[0], a[1], a[2] / a[3], a[4], a[5]) for a in per_token.values()), reverse=True)[:3]
@@ -163,14 +167,9 @@ def analyze(trades, prices):
     return r
 
 
-def bought_top(after, price):
-    """Alımdan sonra fiyat önce %FOMO_FALL düştüyse (arada %MIN_MISS üstüne çıkmadan) True."""
-    for p in after:
-        if p >= price * (1 + MIN_MISS):
-            return False
-        if p <= price * (1 - FOMO_FALL):
-            return True
-    return False
+def bought_top(week, price):
+    """Tepeden alım: sonraki 7 günde fiyat alımın %MIN_MISS üstüne hiç çıkmadı ve en az %FOMO_FALL düştü."""
+    return bool(week) and max(week) < price * (1 + MIN_MISS) and min(week) <= price * (1 - FOMO_FALL)
 
 
 def paper_hands_score(r):
