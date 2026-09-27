@@ -95,11 +95,25 @@ class XClient:
         return list(reversed(j.get("data") or [])), (j.get("meta") or {}).get("newest_id")
 
 
+def normalize_channel(ch):
+    """'t.me/ad', 'https://t.me/ad', 'ad' → '@ad'; sayısal kimlik (-100…) olduğu gibi kalır."""
+    ch = (ch or "").strip()
+    for pre in ("https://", "http://", "t.me/", "telegram.me/"):
+        if ch.startswith(pre):
+            ch = ch[len(pre):]
+    ch = ch.strip("/")
+    if ch and not ch.startswith("@") and not ch.lstrip("-").isdigit():
+        ch = "@" + ch
+    return ch
+
+
 class Telegram:
     def __init__(self, token):
         self.api = f"https://api.telegram.org/bot{token}"
+        self.error = None
 
     def post(self, chat, text, png=None):
+        chat = normalize_channel(str(chat))
         try:
             if png:
                 r = requests.post(f"{self.api}/sendPhoto", data={"chat_id": chat, "caption": text[:1000]},
@@ -108,9 +122,14 @@ class Telegram:
                 r = requests.post(f"{self.api}/sendMessage", json={"chat_id": chat, "text": text,
                                                                    "disable_web_page_preview": True}, timeout=30)
             if not r.ok:
+                try:
+                    self.error = r.json().get("description")
+                except ValueError:
+                    self.error = f"HTTP {r.status_code}"
                 print(f"Telegram kanal hatası: {r.status_code} {r.text[:200]}", flush=True)
             return r.ok
         except requests.RequestException as e:
+            self.error = str(e)[:120]
             print(f"Telegram kanal hatası: {e}", flush=True)
             return False
 

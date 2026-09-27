@@ -303,18 +303,30 @@ class Bot:
             return self.send(chat, "Usage: /announce &lt;text&gt; — posts to the channel and X with a branded image.")
         from .brand import png_bytes, post_image
         png = png_bytes(post_image(text, self.username))
-        done = []
+        done, problems = [], []
         ch = os.environ.get("TELEGRAM_CHANNEL_ID")
-        if ch and social.Telegram(self.api.rsplit("/bot", 1)[1]).post(ch, text, png):
-            done.append("Telegram")
+        if not ch:
+            problems.append("Telegram: no channel set (run deploy/set_social.sh)")
+        else:
+            tg = social.Telegram(self.api.rsplit("/bot", 1)[1])
+            if tg.post(ch, text, png):
+                done.append(f"Telegram ({social.normalize_channel(ch)})")
+            else:
+                hint = " — is the bot an admin of the channel?" if "not" in (tg.error or "").lower() else ""
+                problems.append(f"Telegram {html.escape(social.normalize_channel(ch))}: {html.escape(tg.error or '?')}{hint}")
         x = social.XClient.from_env()
         if x:
             try:
                 x.post(text[:280], png=png)
                 done.append("X")
             except Exception as e:
-                print(f"duyuru X hatası: {e}", flush=True)
-        self.send(chat, "📣 Posted to: " + (", ".join(done) or "nothing (check channel / X settings)"))
+                problems.append(f"X: {html.escape(str(e)[:120])}")
+        else:
+            problems.append("X: no keys set (optional)")
+        msg = "📣 Posted to: " + (", ".join(done) or "nothing")
+        if problems:
+            msg += "\n\n" + "\n".join("• " + p for p in problems)
+        self.send(chat, msg)
 
     def weekly(self):
         """Pro kullanıcılara pazartesi 09:00 UTC'den sonra haftalık kart."""

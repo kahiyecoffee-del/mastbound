@@ -128,3 +128,9 @@ def test_inline_button_callback():
     finally:
         botmod.requests.post = orig
     assert "seed phrase" in b.out[-1]
+
+
+def test_normalize_channel():
+    assert social.normalize_channel("https://t.me/mastbound_news") == "@mastbound_news"
+    assert social.normalize_channel("mastbound_news") == "@mastbound_news"
+    assert social.normalize_channel("@x") == "@x" and social.normalize_channel("-1001234") == "-1001234"
