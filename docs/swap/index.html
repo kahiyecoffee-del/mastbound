@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mastbound · Swap</title>
 <link rel="icon" href="../logo.png">
-<script src="../config.js"></script>
+<script>document.write('<script src="../config.js?v=' + Date.now() + '"><\/script>')</script>
 <script src="https://plugin.jup.ag/plugin-v1.js" data-preload defer></script>
 <style>
   :root { --bg:#0a0d12; --card:#12161e; --line:#232a36; --ink:#f5f7fa; --ink2:#a0aab8; --ink3:#687280; --gold:#f0c45c; }
@@ -33,9 +33,9 @@
   const cfg = window.MASTBOUND || {};
   const form = { initialInputMint: "So11111111111111111111111111111111111111112" };
   if (cfg.mint) form.initialOutputMint = cfg.mint;
-  if (cfg.referralAccount) { form.referralAccount = cfg.referralAccount; form.referralFee = cfg.feeBps; }
+  if (cfg.referralAccount) { form.referralAccount = cfg.referralAccount; form.referralFee = Math.min(255, Math.max(50, cfg.feeBps || 50)); }
   document.getElementById("fee").textContent = cfg.referralAccount
-    ? `Includes a ${(cfg.feeBps / 100).toFixed(2)}% Mastbound platform fee, shown in the quote before you sign.`
+    ? `Includes a ${(form.referralFee / 100).toFixed(2)}% Mastbound platform fee, shown in the quote before you sign.`
     : "";
   window.addEventListener("load", () => window.Jupiter.init({
     displayMode: "integrated",
