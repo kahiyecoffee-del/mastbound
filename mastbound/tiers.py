@@ -123,22 +123,30 @@ class Store:
             json.dump(self.d, open(tmp, "w"))
             os.replace(tmp, self.path)
 
+    def _pending(self, u, now):
+        """Süresi dolmamış bağlantı istekleri [[nonce, zaman], ...] (eski tek-kayıt biçimi de okunur)."""
+        p = u.get("pending") or []
+        if p and not isinstance(p[0], list):
+            p = [p]
+        return [x for x in p if now - x[1] <= NONCE_TTL]
+
     def start_link(self, uid):
-        u = self.user(uid)
-        nonce, ts = u.get("pending") or [None, 0]
-        if nonce and time.time() - ts < NONCE_TTL - 120:
-            return link_message(uid, nonce)          # art arda /link: aynı bağlantı geçerli kalsın
-        nonce = secrets.token_hex(8)
-        u["pending"] = [nonce, time.time()]
+        u, now = self.user(uid), time.time()
+        pend = self._pending(u, now)
+        if pend and now - pend[-1][1] < NONCE_TTL - 120:
+            return link_message(uid, pend[-1][0])    # art arda /link: aynı bağlantı geçerli kalsın
+        pend.append([secrets.token_hex(8), now])
+        u["pending"] = pend[-5:]
         self.save()
-        return link_message(uid, nonce)
+        return link_message(uid, pend[-1][0])
 
     def finish_link(self, uid, wallet, signature):
+        """Süresi dolmamış herhangi bir bağlantı isteğinin imzası kabul edilir (eski buton da çalışır)."""
         u = self.user(uid)
-        nonce, ts = u.get("pending") or [None, 0]
-        if not nonce or time.time() - ts > NONCE_TTL:
+        pend = self._pending(u, time.time())
+        if not pend:
             return "expired"
-        if not verify_signature(wallet, link_message(uid, nonce), signature):
+        if not any(verify_signature(wallet, link_message(uid, n), signature) for n, _ in pend):
             return "bad"
         u.update(wallet=wallet, linked_at=int(time.time()), checked=0)
         u.pop("pending", None)

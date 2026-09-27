@@ -42,7 +42,7 @@ def test_link_expires(tmp_path):
     s = tiers.Store(str(tmp_path / "u.json"))
     k, wallet = keypair()
     msg = s.start_link(7)
-    s.user(7)["pending"][1] -= tiers.NONCE_TTL + 1
+    s.user(7)["pending"][0][1] -= tiers.NONCE_TTL + 1
     assert s.finish_link(7, wallet, b58encode(k.sign(msg.encode()))) == "expired"
 
 
@@ -97,3 +97,21 @@ def test_repeated_link_keeps_same_message(tmp_path):
     first = s.start_link(9)
     assert s.start_link(9) == first
     assert s.finish_link(9, wallet, b58encode(k.sign(first.encode()))) == "ok"
+
+
+def test_older_unexpired_link_still_works(tmp_path):
+    s = tiers.Store(str(tmp_path / "u.json"))
+    k, wallet = keypair()
+    old = s.start_link(8)
+    s.user(8)["pending"][0][1] -= tiers.NONCE_TTL - 60        # eski ama süresi dolmamış
+    new = s.start_link(8)
+    assert new != old
+    assert s.finish_link(8, wallet, b58encode(k.sign(old.encode()))) == "ok"
+
+
+def test_legacy_pending_format(tmp_path):
+    s = tiers.Store(str(tmp_path / "u.json"))
+    k, wallet = keypair()
+    s.user(4)["pending"] = ["abc123", time.time()]
+    msg = tiers.link_message(4, "abc123")
+    assert s.finish_link(4, wallet, b58encode(k.sign(msg.encode()))) == "ok"
