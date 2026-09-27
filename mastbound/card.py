@@ -1,30 +1,30 @@
 """Paylaşılabilir Pişmanlık Kartı (PNG, 1080×1350 — X/Instagram/Telegram için dikey).
 
-Tema: gece denizi. Puan bir "fırtına ölçeri" (yarım daire gösterge + ibre) ile gösterilir; puana göre bir denizci
-kişiliği (unvan + kısa cümle) ve çizilmiş bir tekne (sağlam gemi → kağıt tekne) verilir. Altta 2×2 sayı kutucukları
-ve en büyük pişmanlıklar. Metin her zaman metin renginde; renk yalnız gösterge ve kâr/zarar yön işaretinde
-(işaret + renk birlikte, renk tek başına anlam taşımaz).
+Tasarım: borsa "PnL paylaşım kartı" dili — koyu zemin, marka altını vurgusu, büyük rakamlar, sade etiketler,
+alt şeritte QR ile "kendi cüzdanını ölç" çağrısı. Yazı tipleri projeyle gelir (Inter + Space Grotesk, OFL).
+Renk anlamı tek başına taşımaz: kâr/zarar yönü hem renk hem üçgen işaretle gösterilir.
 """
 import io
 import math
 import os
+from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
-
-from functools import lru_cache
 
 from .analysis import MIN_SCORED
 from .logo import render_logo
 
 W, H = 1080, 1350
 PAD = 64
-SKY_TOP, SKY_BOTTOM = (13, 27, 48), (18, 58, 82)
-INK = "#ffffff"
-INK2 = "#cfe0ea"
-INK3 = "#8fb0c2"
-FOAM = (255, 255, 255)
-GOOD, WARN, CRIT = "#2fd08a", "#fab219", "#ff6b6b"
-GAUGE_TRACK = (255, 255, 255, 38)
+BG_TOP, BG_BOTTOM = (11, 14, 20), (8, 10, 14)
+INK = (245, 247, 250)
+INK2 = (160, 170, 184)
+INK3 = (104, 114, 128)
+LINE = (255, 255, 255, 22)
+GOLD = (240, 196, 92)
+GOLD_SOFT = (240, 196, 92, 40)
+UP, DOWN = (46, 204, 138), (246, 70, 93)
+WARN = (250, 178, 25)
 
 PERSONAS = [  # (en yüksek puan, unvan, cümle)
     (15, "Iron Captain", "Sirens sing. You don't even blink."),
@@ -34,13 +34,15 @@ PERSONAS = [  # (en yüksek puan, unvan, cümle)
     (100, "Paper Boat", "One wave and you're gone. Tie yourself to the mast!"),
 ]
 
-_FONT_DIRS = ["/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu", "/usr/share/fonts/TTF"]
+FONT_DIR = os.path.join(os.path.dirname(__file__), "fonts")
+_FACES = {"regular": "Inter-Regular.ttf", "medium": "Inter-Medium.ttf", "bold": "Inter-Bold.ttf",
+          "black": "Inter-ExtraBold.ttf", "num": "SpaceGrotesk-Bold.ttf"}
+_FALLBACK = ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"]
 
 
-def _font(size, bold=False):
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
-    for d in _FONT_DIRS:
-        p = os.path.join(d, name)
+@lru_cache(maxsize=64)
+def _font(size, face="regular"):
+    for p in [os.path.join(FONT_DIR, _FACES[face])] + _FALLBACK:
         if os.path.exists(p):
             return ImageFont.truetype(p, size)
     return ImageFont.load_default(size=size)
@@ -60,7 +62,7 @@ def fmt_price(p):
 
 
 def severity(score):
-    return GOOD if score < 34 else WARN if score < 67 else CRIT
+    return UP if score < 34 else WARN if score < 67 else DOWN
 
 
 def persona(score):
@@ -72,166 +74,205 @@ def persona(score):
     return PERSONAS[-1][1:]
 
 
+def _tracked(d, xy, text, font, fill, spacing):
+    """Harf aralıklı yazı (etiketler için); genişliği döner."""
+    x, y = xy
+    for ch in text:
+        d.text((x, y), ch, font=font, fill=fill)
+        x += d.textlength(ch, font=font) + spacing
+    return x - xy[0] - spacing
+
+
+def _tracked_len(d, text, font, spacing):
+    return sum(d.textlength(ch, font=font) for ch in text) + spacing * (len(text) - 1)
+
+
+def _label(d, xy, text, fill=INK3, size=20):
+    _tracked(d, xy, text.upper(), _font(size, "medium"), fill, 2.2)
+
+
+@lru_cache(maxsize=1)
 def _background():
-    img = Image.new("RGB", (W, H))
-    px = img.load()
-    for y in range(H):
-        t = y / (H - 1)
-        c = tuple(int(SKY_TOP[i] + (SKY_BOTTOM[i] - SKY_TOP[i]) * t) for i in range(3))
-        for x in range(W):
-            px[x, y] = c
-    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    # yıldızlar (sabit tohum: her kartta aynı gökyüzü)
-    seed = 7
-    for _ in range(70):
-        seed = (seed * 1103515245 + 12345) % 2 ** 31
-        x = seed % W
-        seed = (seed * 1103515245 + 12345) % 2 ** 31
-        y = seed % 520
-        r = 1 + (seed % 3 == 0)
-        d.ellipse([x - r, y - r, x + r, y + r], fill=(255, 255, 255, 90 + seed % 100))
-    # ay
-    d.ellipse([W - 250, 150, W - 170, 230], fill=(255, 244, 214, 230))
-    d.ellipse([W - 228, 138, W - 150, 216], fill=SKY_TOP + (255,))
-    return Image.alpha_composite(img.convert("RGBA"), layer)
+    base = Image.linear_gradient("L").resize((W, H))
+    top, bot = Image.new("RGB", (W, H), BG_TOP), Image.new("RGB", (W, H), BG_BOTTOM)
+    img = Image.composite(bot, top, base).convert("RGBA")
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    g = ImageDraw.Draw(glow)
+    g.ellipse([W - 620, -260, W + 260, 620], fill=(240, 196, 92, 58))       # altın ışık (sağ üst)
+    g.ellipse([-420, 760, 420, 1520], fill=(40, 120, 200, 46))              # deniz mavisi (sol alt)
+    glow = glow.filter(ImageFilter.GaussianBlur(150))
+    img = Image.alpha_composite(img, glow)
+    lines = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(lines)
+    for x in range(-H, W, 36):                                              # ince çapraz doku
+        ld.line([(x, H), (x + H, 0)], fill=(255, 255, 255, 7), width=1)
+    for k, a in enumerate((26, 18, 12)):                                    # alt kısımda dalga konturları
+        y0 = 1128 + k * 20
+        pts = [(x, y0 + 9 * math.sin(x / 70.0 + k * 1.7)) for x in range(0, W + 8, 8)]
+        ld.line(pts, fill=(120, 170, 220, a), width=2)
+    return Image.alpha_composite(img, lines)
 
 
-def _waves(d, y0, amp, alpha, phase):
-    pts = [(x, y0 + amp * math.sin(x / 55.0 + phase)) for x in range(0, W + 10, 10)]
-    d.polygon(pts + [(W, H), (0, H)], fill=(20, 90, 120, alpha))
-    d.line(pts, fill=FOAM + (min(255, alpha + 40),), width=3)
-
-
-def _boat(d, cx, cy, score):
-    """Puan düşükse direkli sağlam gemi, yüksekse kağıttan tekne."""
-    if score is not None and score > 55:
-        # kağıt tekne
-        d.polygon([(cx - 90, cy), (cx + 90, cy), (cx + 55, cy + 42), (cx - 55, cy + 42)], fill=(245, 245, 240, 255))
-        d.polygon([(cx - 90, cy), (cx, cy - 70), (cx + 90, cy)], fill=(225, 228, 230, 255))
-        d.line([(cx, cy - 70), (cx, cy)], fill=(190, 195, 200, 255), width=3)
-        return
-    # sağlam gemi: gövde, direk, yelken, bayrak
-    d.polygon([(cx - 100, cy), (cx + 100, cy), (cx + 70, cy + 45), (cx - 70, cy + 45)], fill=(140, 86, 52, 255))
-    d.line([(cx - 95, cy + 10), (cx + 95, cy + 10)], fill=(110, 64, 38, 255), width=4)
-    d.line([(cx, cy), (cx, cy - 150)], fill=(90, 58, 36, 255), width=7)
-    d.polygon([(cx + 6, cy - 140), (cx + 85, cy - 30), (cx + 6, cy - 30)], fill=(250, 248, 240, 255))
-    d.polygon([(cx - 6, cy - 120), (cx - 70, cy - 30), (cx - 6, cy - 30)], fill=(235, 232, 222, 255))
-    d.polygon([(cx, cy - 150), (cx + 38, cy - 140), (cx, cy - 130)], fill=(57, 135, 229, 255))
-    # direğe bağlanmış ip: Ulysses
-    d.line([(cx - 12, cy - 70), (cx + 12, cy - 60)], fill=(230, 200, 140, 255), width=4)
-    d.line([(cx - 12, cy - 55), (cx + 12, cy - 45)], fill=(230, 200, 140, 255), width=4)
-
-
-def _gauge(d, cx, cy, radius, score):
-    box = [cx - radius, cy - radius, cx + radius, cy + radius]
-    d.arc(box, 180, 360, fill=GAUGE_TRACK, width=26)
-    if score is None:
-        return
-    end = 180 + 180 * score / 100
-    d.arc(box, 180, end, fill=severity(score), width=26)
-    # ibre yerine yay üzerinde parlak bir işaret (sayıyla çakışmaz)
-    ang = math.radians(end)
-    mx, my = cx + radius * math.cos(ang), cy + radius * math.sin(ang)
-    d.ellipse([mx - 22, my - 22, mx + 22, my + 22], fill=INK)
-    d.ellipse([mx - 11, my - 11, mx + 11, my + 11], fill=severity(score))
-
-
-def _tile(d, x, y, w, h, label, value, marker=None, marker_color=None):
-    d.rounded_rectangle([x, y, x + w, y + h], radius=28, fill=(255, 255, 255, 26), outline=(255, 255, 255, 40), width=2)
-    d.text((x + 28, y + 24), label, font=_font(26), fill=INK2)
-    vx = x + 28
-    if marker:
-        d.text((vx, y + 66), marker, font=_font(50, True), fill=marker_color)
-        vx += d.textlength(marker, font=_font(50, True)) + 10
-    d.text((vx, y + 66), value, font=_font(50, True), fill=INK)
-
-
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=4)
 def _logo(size):
     return render_logo(size)
 
 
-def render(addr, r):
-    img = _background()
+def _ring(layer, cx, cy, radius, score):
+    """270°'lik halka gösterge, içinde logo madalyonu."""
+    d = ImageDraw.Draw(layer)
+    width = 22
+    box = [cx - radius, cy - radius, cx + radius, cy + radius]
+    start, sweep = 135, 270
+    d.arc(box, start, start + sweep, fill=(255, 255, 255, 26), width=width)
+    for k in range(0, 101, 10):                                             # ölçek çentikleri
+        a = math.radians(start + sweep * k / 100)
+        r1, r2 = radius + 12, radius + (26 if k % 50 == 0 else 20)
+        d.line([(cx + r1 * math.cos(a), cy + r1 * math.sin(a)), (cx + r2 * math.cos(a), cy + r2 * math.sin(a))],
+               fill=(255, 255, 255, 70), width=2)
+    if score is not None:
+        col = severity(score)
+        end = start + sweep * max(score, 1) / 100
+        glow = Image.new("RGBA", layer.size, (0, 0, 0, 0))
+        ImageDraw.Draw(glow).arc(box, start, end, fill=col + (150,), width=width + 16)
+        layer.alpha_composite(glow.filter(ImageFilter.GaussianBlur(14)))
+        d = ImageDraw.Draw(layer)
+        d.arc(box, start, end, fill=col, width=width)
+        for ang in (start, end):                                            # yuvarlak uçlar
+            a = math.radians(ang)
+            px, py = cx + (radius - width / 2) * math.cos(a), cy + (radius - width / 2) * math.sin(a)
+            d.ellipse([px - width / 2, py - width / 2, px + width / 2, py + width / 2], fill=col)
+    lg = _logo(int(radius * 1.32))
+    layer.alpha_composite(lg, (int(cx - lg.width / 2), int(cy - lg.height / 2)))
+    f = _font(18, "medium")
+    for txt, ang in (("CALM", start), ("PAPER", start + sweep)):           # ölçek uçları
+        a = math.radians(ang)
+        tx, ty = cx + radius * math.cos(a), cy + radius * math.sin(a) + 24
+        _tracked(d, (tx - _tracked_len(d, txt, f, 2) / 2, ty), txt, f, INK3, 2)
+
+
+def _triangle(d, x, y, size, up, fill):
+    if up:
+        d.polygon([(x, y + size), (x + size, y + size), (x + size / 2, y)], fill=fill)
+    else:
+        d.polygon([(x, y), (x + size, y), (x + size / 2, y + size)], fill=fill)
+
+
+def _stat(d, x, y, label, value, color=INK, arrow=None):
+    _label(d, (x, y), label)
+    vx = x
+    if arrow is not None:
+        _triangle(d, x, y + 58, 24, arrow, color)
+        vx += 34
+    d.text((vx, y + 34), value, font=_font(54, "num"), fill=color)
+
+
+def _qr(data, size):
+    try:
+        import qrcode
+    except ImportError:
+        return None
+    q = qrcode.QRCode(border=2, box_size=10, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    q.add_data(data)
+    q.make(fit=True)
+    return q.make_image(fill_color="black", back_color="white").get_image().convert("RGBA").resize(
+        (size, size), Image.NEAREST)
+
+
+def render(addr, r, bot=None):
+    img = _background().copy()
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
 
-    # başlık
-    lg = _logo(96)
-    layer.alpha_composite(lg, (PAD, PAD - 6))
-    d.text((PAD + 112, PAD + 2), "MASTBOUND", font=_font(40, True), fill=INK)
-    d.text((PAD + 112, PAD + 54), "Regret Mirror", font=_font(28), fill=INK2)
+    # ── başlık
+    layer.alpha_composite(_logo(76), (PAD, 52))
+    _tracked(d, (PAD + 94, 56), "MASTBOUND", _font(36, "black"), INK, 3.5)
+    _tracked(d, (PAD + 96, 102), "REGRET MIRROR", _font(18, "medium"), GOLD, 3.2)
     short = f"{addr[:4]}…{addr[-4:]}"
-    sw = d.textlength(short, font=_font(26))
-    d.rounded_rectangle([W - PAD - sw - 36, PAD + 4, W - PAD, PAD + 52], radius=24, fill=(255, 255, 255, 30))
-    d.text((W - PAD - sw - 18, PAD + 13), short, font=_font(26), fill=INK2)
+    f = _font(24, "medium")
+    sw = d.textlength(short, font=f)
+    d.rounded_rectangle([W - PAD - sw - 56, 66, W - PAD, 114], radius=24, fill=(255, 255, 255, 16),
+                        outline=(255, 255, 255, 34), width=2)
+    d.ellipse([W - PAD - sw - 38, 85, W - PAD - sw - 28, 95], fill=UP)            # "okundu" noktası
+    d.text((W - PAD - sw - 18, 76), short, font=f, fill=INK2)
 
-    # fırtına ölçeri + puan
-    gx, gy, rad = 330, 470, 210
-    _gauge(d, gx, gy, rad, r.score)
-    big = "?" if r.score is None else str(r.score)
-    bw = d.textlength(big, font=_font(120, True))
-    d.text((gx - bw / 2, gy - 165), big, font=_font(120, True), fill=INK)
-    lab = "Paper Hands Score"
-    d.text((gx - d.textlength(lab, font=_font(26)) / 2, gy - 30), lab, font=_font(26), fill=INK2)
+    # ── skor
+    top = 196
+    _label(d, (PAD, top), "Paper Hands Score", INK2, 22)
+    big = "—" if r.score is None else str(r.score)
+    col = INK if r.score is None else severity(r.score)
+    fb = _font(210, "num")
+    d.text((PAD - 8, top + 12), big, font=fb, fill=col)
+    bw = d.textlength(big, font=fb)
+    d.text((PAD + bw + 4, top + 176), "/100", font=_font(40, "bold"), fill=INK3)
 
-    # tekne + dalgalar (sağda)
-    boat_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(boat_layer)
-    _boat(bd, 850, 430, r.score)
-    layer = Image.alpha_composite(layer, boat_layer)
-    d = ImageDraw.Draw(layer)
-    _waves(d, 480, 10, 110, 0.0)
-    d.text((gx - rad - 28, gy + 30), "calm", font=_font(22), fill=INK3)
-    d.text((gx + rad - 40, gy + 30), "paper", font=_font(22), fill=INK3)
-
-    # kişilik
     title, line = persona(r.score)
-    ty = 540
-    d.text((PAD, ty), title, font=_font(56, True), fill=INK)
-    d.text((PAD, ty + 72), line, font=_font(28), fill=INK2)
+    ft = _font(30, "bold")
+    tw = d.textlength(title, font=ft)
+    py = top + 290
+    d.rounded_rectangle([PAD, py, PAD + tw + 48, py + 58], radius=29, fill=GOLD_SOFT, outline=GOLD, width=2)
+    d.text((PAD + 24, py + 11), title, font=ft, fill=GOLD)
+    d.text((PAD, py + 80), line, font=_font(25), fill=INK2)
     if r.score is None:
-        d.text((PAD, ty + 112), f"{r.measured} trades measurable so far — need {MIN_SCORED}.", font=_font(24), fill=INK3)
+        d.text((PAD, py + 118), f"{r.measured} trades measurable so far — need {MIN_SCORED}.",
+               font=_font(22), fill=INK3)
 
-    # 2×2 kutucuk
-    ky, gap = 720, 20
-    tw, th = (W - 2 * PAD - gap) // 2, 140
-    _tile(d, PAD, ky, tw, th, "Missed by selling early", compact_usd(r.missed_usd))
+    _ring(layer, 812, top + 200, 160, r.score)
+    d = ImageDraw.Draw(layer)
+
+    # ── ayraç + istatistikler (3 sütun × 2 satır)
+    dy = 690
+    d.line([(PAD, dy), (W - PAD, dy)], fill=LINE, width=2)
+    cw = (W - 2 * PAD) // 3
+    y1, y2 = dy + 36, dy + 170
     if r.closed:
         up = r.realized_pnl >= 0
-        _tile(d, PAD + tw + gap, ky, tw, th, f"Realized PnL · win {r.wins / r.closed * 100:.0f}%",
-              compact_usd(r.realized_pnl), "▲" if up else "▼", GOOD if up else CRIT)
+        _stat(d, PAD, y1, "Realized PnL", compact_usd(r.realized_pnl), UP if up else DOWN, up)
+        _stat(d, PAD + cw, y1, "Win rate", f"{r.wins / r.closed * 100:.0f}%")
     else:
-        _tile(d, PAD + tw + gap, ky, tw, th, "Realized PnL", "—")
-    _tile(d, PAD, ky + th + gap, tw, th, "Panic sells", str(r.panic_sells))
-    _tile(d, PAD + tw + gap, ky + th + gap, tw, th, "FOMO buys", str(r.fomo_buys))
+        _stat(d, PAD, y1, "Realized PnL", "—")
+        _stat(d, PAD + cw, y1, "Win rate", "—")
+    _stat(d, PAD + 2 * cw, y1, "Missed early", compact_usd(r.missed_usd), DOWN if r.missed_usd >= 1 else INK)
+    _stat(d, PAD, y2, "Panic sells", str(r.panic_sells))
+    _stat(d, PAD + cw, y2, "FOMO buys", str(r.fomo_buys))
+    _stat(d, PAD + 2 * cw, y2, "Trades scored", f"{r.measured}/{r.trades}")
 
-    # en büyük pişmanlıklar
-    ly = ky + 2 * th + gap + 36
+    # ── en büyük pişmanlıklar
+    ry = dy + 318
+    d.line([(PAD, ry - 26), (W - PAD, ry - 26)], fill=LINE, width=2)
     if r.worst:
-        d.text((PAD, ly), "Biggest regrets", font=_font(30, True), fill=INK)
-        for i, (miss, sym, p, hi, n) in enumerate(r.worst[:3]):
-            yy = ly + 50 + i * 46
-            d.text((PAD, yy), f"{sym[:12]}", font=_font(27, True), fill=INK)
-            kez = f"{n}× " if n > 1 else ""
-            d.text((PAD + 210, yy + 2), f"{kez}sold {fmt_price(p)} → later {fmt_price(hi)}", font=_font(25), fill=INK2)
-            val = compact_usd(miss)
-            d.text((W - PAD - d.textlength(val, font=_font(27, True)), yy), val, font=_font(27, True), fill=INK)
+        _label(d, (PAD, ry), "Biggest regrets", INK2, 20)
+        for i, (miss, sym, p, hi, n) in enumerate(r.worst[:2]):
+            yy = ry + 38 + i * 44
+            d.text((PAD, yy), sym[:10], font=_font(27, "bold"), fill=INK)
+            times = f"{n}× " if n > 1 else ""
+            d.text((PAD + 200, yy + 3), f"{times}sold {fmt_price(p)}  ·  peak {fmt_price(hi)}", font=_font(23),
+                   fill=INK2)
+            val = "−" + compact_usd(miss)
+            d.text((W - PAD - d.textlength(val, font=_font(28, "num")), yy), val, font=_font(28, "num"), fill=DOWN)
     else:
-        d.text((PAD, ly), "Clean exits" if r.sells else "No sells yet", font=_font(30, True), fill=INK)
+        _label(d, (PAD, ry), "Clean exits" if r.sells else "No sells yet", INK2, 20)
         msg = ("No sell was followed by a 10%+ run within 30 days." if r.sells
                else "Nothing sold, nothing to regret — yet.")
-        d.text((PAD, ly + 50), msg, font=_font(25), fill=INK2)
-    log = f"{r.trades} trades · {r.tokens} tokens · {r.measured} scored"
-    if r.unmeasured:
-        log += f" · {r.unmeasured} too recent / no price"
-    d.text((PAD, H - 118), log, font=_font(23), fill=INK3)
+        d.text((PAD, ry + 40), msg, font=_font(26, "medium"), fill=INK)
 
-    # alt dalgalar + alt bilgi
-    _waves(d, H - 70, 8, 70, 1.3)
-    foot = "Not financial advice — a measurement of past trades only."
-    d.text((PAD, H - 52), foot, font=_font(22), fill=INK2)
+    # ── alt şerit: çağrı + QR
+    fy = 1164
+    d.rounded_rectangle([PAD, fy, W - PAD, fy + 122], radius=26, fill=(255, 255, 255, 14),
+                        outline=(255, 255, 255, 30), width=2)
+    tx = PAD + 30
+    if bot:
+        qr = _qr(f"https://t.me/{bot}", 94)
+        if qr:
+            layer.alpha_composite(qr, (W - PAD - 108, fy + 14))
+        d.text((tx, fy + 24), "Mirror your own wallet", font=_font(30, "bold"), fill=INK)
+        d.text((tx, fy + 68), f"@{bot}  ·  Telegram", font=_font(24, "medium"), fill=GOLD)
+    else:
+        d.text((tx, fy + 24), "Mastbound · Regret Mirror", font=_font(30, "bold"), fill=INK)
+        d.text((tx, fy + 68), "Tie yourself to the mast.", font=_font(24, "medium"), fill=GOLD)
+    foot = "Not financial advice · a measurement of past on-chain trades only"
+    ff = _font(19)
+    d.text(((W - d.textlength(foot, font=ff)) / 2, H - 44), foot, font=ff, fill=INK3)
 
     out = Image.alpha_composite(img, layer).convert("RGB")
     buf = io.BytesIO()

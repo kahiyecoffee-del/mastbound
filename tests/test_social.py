@@ -100,3 +100,25 @@ def test_private_plain_address():
     b = _bot()
     b.handle({"chat": {"id": 9, "type": "private"}, "from": {"id": 9}, "text": "7" * 43})
     assert b.jobs.get_nowait() == (9, "7" * 43)
+
+
+def test_card_with_qr_and_caption():
+    from mastbound.analysis import Report
+    from mastbound.bot import html_caption
+    from mastbound.card import render
+    r = Report(trades=35, measured=21, unmeasured=14, score=21, tokens=2, closed=11, wins=10, realized_pnl=53000)
+    assert render("7" * 43, r, bot="MBot")[:4] == b"\x89PNG"
+    c = html_caption("7" * 43, r)
+    assert "Steady Sailor" in c and "<b>21/100</b>" in c
+
+
+def test_inline_button_callback():
+    b = _bot()
+    import mastbound.bot as botmod
+    orig = botmod.requests.post
+    botmod.requests.post = lambda *a, **k: None
+    try:
+        b.callback({"id": "1", "data": "/safety", "message": {"chat": {"id": 5}}})
+    finally:
+        botmod.requests.post = orig
+    assert "seed phrase" in b.out[-1]
