@@ -134,3 +134,18 @@ def test_normalize_channel():
     assert social.normalize_channel("https://t.me/mastbound_news") == "@mastbound_news"
     assert social.normalize_channel("mastbound_news") == "@mastbound_news"
     assert social.normalize_channel("@x") == "@x" and social.normalize_channel("-1001234") == "-1001234"
+
+
+def test_group_leaderboard():
+    b = _bot("/tmp/mb_test_users4.json")
+    b.names.update({1: "Ali", 2: "Ayşe", 3: "Can", 4: "<Deniz>"})
+    for uid, sc in ((1, 40), (2, 12), (3, 88), (4, 25)):
+        b.record_score(-100, uid, sc)
+    b.record_score(-100, 1, 30)                                 # son puan geçerli
+    txt = b.leaderboard_text(-100)
+    assert txt.index("Ayşe") < txt.index("&lt;Deniz&gt;") < txt.index("Ali — 30")
+    assert "Paper boat of the group: Can" in txt
+    assert "No scores" in b.leaderboard_text(-200)
+    import time as _t
+    b.record_score(-300, 9, 50, now=_t.time() - 40 * 86400)
+    assert "No scores" in b.leaderboard_text(-300)              # 30 günden eski

@@ -25,13 +25,14 @@ WELCOME = ("⚓ <b>Welcome aboard Mastbound</b>\n\n"
 PROMO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "promo.png")
 COMMANDS = [("regret", "Regret Mirror card for a wallet"), ("tier", "Your tier and limits"),
             ("link", "Link your wallet (unlock tiers)"), ("pact", "Ulysses Pact: promise not to sell"),
-            ("swap", "Swap on Solana via Jupiter"), ("invite", "Invite friends, earn bonus cards"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
+            ("swap", "Swap on Solana via Jupiter"), ("invite", "Invite friends, earn bonus cards"),
+            ("leaderboard", "Group ranking: calmest hands"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
             ("safety", "How to stay safe"), ("token", "$MBOUND info"), ("help", "All commands")]
 HELP = ("<b>Commands</b>\n/regret &lt;wallet&gt; — your Regret Mirror card (works in groups too)\n"
         "/details — trade-by-trade breakdown of your last card\n/tier — your tier and limits\n"
         "/link — link your wallet to unlock Standard / Pro\n"
         "/pact &lt;token&gt; &lt;days&gt; — Ulysses Pact: promise not to sell, get storm alerts\n/pacts — your pacts\n"
-        "/swap — swap via Jupiter\n/invite — your invite link (+3 bonus cards per friend)\n/about — what Mastbound is\n"
+        "/swap — swap via Jupiter\n/invite — your invite link (+3 bonus cards per friend)\n/leaderboard — calmest hands in this group\n/about — what Mastbound is\n"
         "/safety — how to stay safe\n/token — $MBOUND info\n\nIn a private chat you can also just paste a wallet address.")
 FAQ = {
     "/about": ("⚓ Mastbound is a behavioral mirror for crypto traders.\n\nThe Regret Mirror reads a Solana wallet's public swap "
@@ -41,6 +42,7 @@ FAQ = {
                 "• The Regret Mirror only needs a public address — no wallet connect, no signature.\n"
                 "• Official token address is only announced in this bot's /token and our official channels."),
 }
+BOARD_DAYS = 30        # grup liderlik tablosu penceresi
 COOLDOWN = 60          # aynı kullanıcı için saniye
 
 
@@ -53,6 +55,7 @@ class Bot:
         self.username = None
         self.store = tiers.Store(os.path.join(os.environ.get("MASTBOUND_CACHE", "cache"), "users.json"))
         self.reports = {}                    # kullanıcı → (adres, rapor): /details için
+        self.names = {}                      # kullanıcı → görünen ad (grup liderlik tablosu)
 
     def fetch_username(self):
         try:
@@ -110,6 +113,8 @@ class Bot:
                 if not ok:
                     self.send(chat, html.escape(text))
                 self.reports[user] = (addr, r)
+                if chat < 0 and r.score is not None:             # grup: liderlik tablosuna yaz
+                    self.record_score(chat, user, r.score)
                 if r.events and tiers.LIMITS[tier]["details"]:
                     self.send(chat, f"📋 {len(r.events)} flagged trades — tap for the breakdown.",
                               {"inline_keyboard": [[{"text": "📋 Trade details", "callback_data": "/details"}]]})
@@ -124,6 +129,8 @@ class Bot:
         chat = msg["chat"]["id"]
         private = msg["chat"].get("type") == "private"
         user = (msg.get("from") or {}).get("id", chat)
+        frm = msg.get("from") or {}
+        self.names[user] = (frm.get("first_name") or frm.get("username") or "sailor")[:24]
         text = (msg.get("text") or "").strip()
         words = text.split()
         cmd = words[0].lower() if words and words[0].startswith("/") else ""
@@ -148,6 +155,9 @@ class Bot:
             return self.send(chat, f"🔗 <b>Your invite link</b>\n{link}\n\nEvery friend who starts the bot with it gives you "
                                    f"+{tiers.REF_BONUS} bonus cards (used when your daily limit runs out).\n"
                                    f"Friends invited: {u.get('refs', 0)} · Bonus cards left: {u.get('bonus', 0)}")
+        if cmd == "/leaderboard":
+            return self.send(chat, self.leaderboard_text(chat) if not private
+                             else "Add me to a group and use /regret there — /leaderboard ranks the group's calmest hands.")
         if cmd == "/feature":
             return self.feature_cmd(chat, user, words[1:], text)
         if cmd in FAQ:
@@ -308,6 +318,31 @@ class Bot:
                         self.store.save()
                         self.send(int(uid), msg)
             time.sleep(3600)
+
+    def record_score(self, chat, user, score, now=None):
+        """Grup tablosu: kullanıcının son puanı (30 günden eski kayıtlar düşer)."""
+        now = int(now or time.time())
+        board = self.store.d.setdefault("_boards", {}).setdefault(str(chat), {})
+        board[str(user)] = {"name": self.names.get(user, "sailor"), "score": score, "ts": now}
+        for k in [k for k, v in board.items() if now - v["ts"] > BOARD_DAYS * 86400]:
+            del board[k]
+        self.store.save()
+
+    def leaderboard_text(self, chat, now=None):
+        now = now or time.time()
+        board = self.store.d.get("_boards", {}).get(str(chat), {})
+        rows = sorted((v["score"], v["name"]) for v in board.values() if now - v["ts"] <= BOARD_DAYS * 86400)
+        if not rows:
+            return "No scores in this group yet. Run /regret &lt;wallet&gt; to get on the board. ⚓"
+        medals = ["🥇", "🥈", "🥉"]
+        lines = ["⚓ <b>Calmest hands in this group</b> (lower = steadier)", ""]
+        for i, (sc, name) in enumerate(rows[:10]):
+            lines.append(f"{medals[i] if i < 3 else f'{i + 1}.'} {html.escape(name)} — {sc}/100 · {persona(sc)[0]}")
+        if len(rows) > 3:
+            sc, name = rows[-1]
+            lines += ["", f"🧻 Paper boat of the group: {html.escape(name)} — {sc}/100"]
+        lines += ["", f"<i>Last {BOARD_DAYS} days · /regret &lt;wallet&gt; to join</i>"]
+        return "\n".join(lines)
 
     @staticmethod
     def is_admin(user):
