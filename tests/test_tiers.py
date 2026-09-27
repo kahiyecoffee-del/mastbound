@@ -89,3 +89,11 @@ def test_details_command():
     b.reports[3] = ("7" * 43, r)
     b.details(3, 3)
     assert "Panic sell" in b.out[-1] and "BONK&lt;x&gt;" in b.out[-1]
+
+
+def test_repeated_link_keeps_same_message(tmp_path):
+    s = tiers.Store(str(tmp_path / "u.json"))
+    k, wallet = keypair()
+    first = s.start_link(9)
+    assert s.start_link(9) == first
+    assert s.finish_link(9, wallet, b58encode(k.sign(first.encode()))) == "ok"

@@ -124,8 +124,12 @@ class Store:
             os.replace(tmp, self.path)
 
     def start_link(self, uid):
+        u = self.user(uid)
+        nonce, ts = u.get("pending") or [None, 0]
+        if nonce and time.time() - ts < NONCE_TTL - 120:
+            return link_message(uid, nonce)          # art arda /link: aynı bağlantı geçerli kalsın
         nonce = secrets.token_hex(8)
-        self.user(uid)["pending"] = [nonce, time.time()]
+        u["pending"] = [nonce, time.time()]
         self.save()
         return link_message(uid, nonce)
 
