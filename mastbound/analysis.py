@@ -101,6 +101,7 @@ def analyze(trades, prices):
     for t in trades:
         if t.side == "buy":
             rebuy.setdefault(t.mint, []).append([t.ts, t.amount])
+    exit_px = exit_prices(trades)
     per_token = {}                               # mint -> [kaçan $, sembol, satış $ toplamı, satılan adet, zirve, adet]
     for t in trades:
         s = series.get(t.mint) or Series({})
@@ -117,7 +118,9 @@ def analyze(trades, prices):
                 r.unmeasured += 1
                 continue
             r.measured += 1
-            if pre and t.price >= min(pre) * (1 + FOMO_RISE) and bought_top(week, t.price):
+            sold = exit_px.get(id(t))              # bu alımın token'ları kârla satıldıysa tepeden alım değildir
+            if (pre and t.price >= min(pre) * (1 + FOMO_RISE) and bought_top(week, t.price)
+                    and not (sold and sold >= t.price)):
                 r.fomo_buys += 1
             continue
         r.sells += 1
@@ -165,6 +168,31 @@ def analyze(trades, prices):
     r.worst = sorted(((a[0], a[1], a[2] / a[3], a[4], a[5]) for a in per_token.values()), reverse=True)[:3]
     r.score = paper_hands_score(r)
     return r
+
+
+def exit_prices(trades):
+    """FIFO: her alımın token'larının ortalama satış fiyatı {id(alım): fiyat} (satılmamışsa yok).
+    Saatlik fiyat dakikalık al-satı göremez; gerçekleşen satış fiyatı bunu düzeltir."""
+    lots, out = {}, {}
+    for t in trades:
+        if t.side == "buy":
+            lots.setdefault(t.mint, []).append([t, t.amount, 0.0, 0.0])   # alım, kalan, satılan adet, satış $
+            continue
+        left = t.amount
+        for lot in lots.get(t.mint, []):
+            if left <= 0:
+                break
+            q = min(left, lot[1])
+            if q > 0:
+                lot[1] -= q
+                lot[2] += q
+                lot[3] += q * t.price
+                left -= q
+    for mint_lots in lots.values():
+        for b, _, q, usd in mint_lots:
+            if q > 0:
+                out[id(b)] = usd / q
+    return out
 
 
 def bought_top(week, price):

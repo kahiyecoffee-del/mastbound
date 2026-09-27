@@ -117,3 +117,13 @@ def test_profitable_scalper_is_not_panic_or_fomo():
               Trade(T0 + 10 * HOUR, TOK, "buy", 10, 22)]           # hemen geri aldı
     r = analyze(trades, {TOK: px})
     assert r.panic_sells == 0 and r.fomo_buys == 0
+
+
+def test_buy_exited_in_profit_is_not_fomo():
+    # saatlik kapanışlar tepeden alım gibi gösteriyor, ama kişi aynı saat içinde daha yükseğe sattı
+    seq = [1.0] * 6 + [2.0, 1.9, 1.6, 1.5] + [1.5] * 10
+    px = {T0 + h * HOUR: p for h, p in enumerate(seq)}
+    buy = Trade(T0 + 6 * HOUR, TOK, "buy", 10, 20)
+    assert analyze([buy], {TOK: px}).fomo_buys == 1
+    sell = Trade(T0 + 6 * HOUR + 600, TOK, "sell", 10, 23)             # 2.3'ten sattı
+    assert analyze([buy, sell], {TOK: px}).fomo_buys == 0

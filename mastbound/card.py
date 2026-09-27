@@ -29,7 +29,7 @@ GAUGE_TRACK = (255, 255, 255, 38)
 PERSONAS = [  # (en yüksek puan, unvan, cümle)
     (15, "Iron Captain", "Sirens sing. You don't even blink."),
     (35, "Steady Sailor", "A little wobble, but you hold the wheel."),
-    (55, "Wobbly Deckhand", "Half of your sells are the wind's idea."),
+    (55, "Wobbly Deckhand", "Half of your moves are the wind's idea."),
     (75, "Siren-Struck", "The sirens call and you jump ship."),
     (100, "Paper Boat", "One wave and you're gone. Tie yourself to the mast!"),
 ]
