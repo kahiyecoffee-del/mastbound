@@ -59,6 +59,7 @@ class Report:
     closed: int = 0
     tokens: int = 0
     worst: list = field(default_factory=list)     # (kaçan $, sembol, ort. satış fiyatı, sonraki zirve, satış sayısı)
+    events: list = field(default_factory=list)    # (zaman, tür, sembol, işlem fiyatı, referans fiyat)
     score: object = None                          # int ya da None (yetersiz veri)
 
     def summary(self):
@@ -122,6 +123,7 @@ def analyze(trades, prices):
             if (pre and t.price >= min(pre) * (1 + FOMO_RISE) and bought_top(week, t.price)
                     and not (sold and sold >= t.price)):
                 r.fomo_buys += 1
+                r.events.append((t.ts, "fomo", t.symbol or t.mint[:6], t.price, min(pre)))
             continue
         r.sells += 1
         c = cost.get(t.mint)
@@ -154,6 +156,7 @@ def analyze(trades, prices):
                 miss = (hi - t.price) * left
                 r.missed_usd += miss
                 r.early_sells += 1
+                r.events.append((t.ts, "early", t.symbol or t.mint[:6], t.price, hi))
                 a = per_token.setdefault(t.mint, [0.0, t.symbol or t.mint[:6], 0.0, 0.0, 0.0, 0])
                 a[0] += miss
                 a[2] += t.price * left
@@ -164,6 +167,7 @@ def analyze(trades, prices):
         if (pre and t.price <= max(pre) * (1 - PANIC_DROP) and left > 0 and (pnl is None or pnl < 0)
                 and week and max(week) >= t.price * (1 + MIN_MISS)):
             r.panic_sells += 1
+            r.events.append((t.ts, "panic", t.symbol or t.mint[:6], t.price, max(pre)))
     r.tokens = len({t.mint for t in trades})
     r.worst = sorted(((a[0], a[1], a[2] / a[3], a[4], a[5]) for a in per_token.values()), reverse=True)[:3]
     r.score = paper_hands_score(r)

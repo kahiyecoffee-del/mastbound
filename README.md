@@ -28,6 +28,19 @@ The score needs at least 3 scored trades.
 - **Telegram channel + X** — scheduled educational posts (`content/posts.json`).
 - **X mentions** — optional auto-reply with the card to accounts that tag us with a wallet (paid X API tier).
 
+## Tiers
+
+| | Free | Standard (hold $3 of $MBOUND) | Pro (hold $25) |
+|---|---|---|---|
+| Cards per day | 1 | 10 | unlimited |
+| History analyzed | 30 days | 90 days | full |
+| Trade-by-trade breakdown | – | ✓ | ✓ |
+| Weekly report | – | – | ✓ |
+
+Wallet ownership is proven with `/link`: the user signs a one-time message in Phantom on the
+[signing page](docs/verify/index.html) (GitHub Pages) — a message signature, never a transaction.
+Holdings are re-checked daily with a 10% grace band. Before launch (`MBOUND_MINT` unset) everyone is Standard.
+
 ## Run locally
 
 ```bash

@@ -2,3 +2,4 @@ requests>=2.31
 pillow>=10.1
 pytest>=7
 qrcode>=7.4
+cryptography>=41

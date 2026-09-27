@@ -12,9 +12,9 @@ import time
 
 import requests
 
-from . import social
+from . import social, tiers
 from .analysis import card_text
-from .card import compact_usd, persona, render
+from .card import compact_usd, fmt_price, persona, render
 from .chain import DataError, wallet_report
 
 ADDR = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -23,9 +23,12 @@ WELCOME = ("⚓ <b>Welcome aboard Mastbound</b>\n\n"
            "FOMO buys have cost — with a Paper Hands Score from 0 to 100.\n\n"
            "🔒 Read-only. No wallet connect, no signatures. We will <b>never</b> ask for a seed phrase or private key.")
 PROMO = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "promo.png")
-COMMANDS = [("regret", "Regret Mirror card for a wallet"), ("about", "What Mastbound is"),
+COMMANDS = [("regret", "Regret Mirror card for a wallet"), ("tier", "Your tier and limits"),
+            ("link", "Link your wallet (unlock tiers)"), ("details", "Trade-by-trade breakdown"), ("about", "What Mastbound is"),
             ("safety", "How to stay safe"), ("token", "$MBOUND info"), ("help", "All commands")]
-HELP = ("<b>Commands</b>\n/regret &lt;wallet&gt; — your Regret Mirror card (works in groups too)\n/about — what Mastbound is\n"
+HELP = ("<b>Commands</b>\n/regret &lt;wallet&gt; — your Regret Mirror card (works in groups too)\n"
+        "/details — trade-by-trade breakdown of your last card\n/tier — your tier and limits\n"
+        "/link — link your wallet to unlock Standard / Pro\n/about — what Mastbound is\n"
         "/safety — how to stay safe\n/token — $MBOUND info\n\nIn a private chat you can also just paste a wallet address.")
 FAQ = {
     "/about": ("⚓ Mastbound is a behavioral mirror for crypto traders.\n\nThe Regret Mirror reads a Solana wallet's public swap "
@@ -45,6 +48,8 @@ class Bot:
         self.jobs = queue.Queue()
         self.last = {}
         self.username = None
+        self.store = tiers.Store(os.path.join(os.environ.get("MASTBOUND_CACHE", "cache"), "users.json"))
+        self.reports = {}                    # kullanıcı → (adres, rapor): /details için
 
     def fetch_username(self):
         try:
@@ -87,9 +92,9 @@ class Bot:
 
     def worker(self):
         while True:
-            chat, addr = self.jobs.get()
+            chat, addr, user, tier = self.jobs.get()
             try:
-                r = wallet_report(addr, self.helius)
+                r = wallet_report(addr, self.helius, days=tiers.LIMITS[tier]["days"])
                 if not r.trades:
                     self.send(chat, "No SOL/USDC trades found for this wallet.")
                     continue
@@ -101,6 +106,10 @@ class Bot:
                     ok = False
                 if not ok:
                     self.send(chat, html.escape(text))
+                self.reports[user] = (addr, r)
+                if r.events and tiers.LIMITS[tier]["details"]:
+                    self.send(chat, f"📋 {len(r.events)} flagged trades — tap for the breakdown.",
+                              {"inline_keyboard": [[{"text": "📋 Trade details", "callback_data": "/details"}]]})
             except DataError as e:
                 print(f"veri hatası {addr}: {e}", flush=True)
                 self.send(chat, "Could not reach trade data right now (data provider error). Please try again in a few minutes.")
@@ -129,6 +138,19 @@ class Bot:
             return self.send(chat, FAQ[cmd])
         if cmd == "/token":
             return self.send(chat, token_info())
+        if cmd in ("/link", "/verify", "/unlink") and not private:
+            return self.send(chat, "For your safety, wallet linking only works in a private chat with me.")
+        if cmd == "/link":
+            return self.link(chat, user)
+        if cmd == "/verify":
+            return self.verify(chat, user, words[1:])
+        if cmd == "/unlink":
+            self.store.unlink(user)
+            return self.send(chat, "Wallet unlinked.")
+        if cmd == "/tier":
+            return self.send(chat, self.tier_text(user))
+        if cmd == "/details":
+            return self.details(chat, user)
         if cmd and cmd != "/regret":
             return None if not private else self.send(chat, HELP)
         addr = words[-1] if words else ""
@@ -138,9 +160,93 @@ class Bot:
         key = (chat, user)
         if time.time() - self.last.get(key, 0) < COOLDOWN:
             return self.send(chat, "Please wait a minute before the next analysis.")
+        tier = self.store.tier(user)
+        if not self.store.take_card(user, tier):
+            return self.send(chat, f"You've used today's free card. Hold $3 of $MBOUND and /link your wallet for "
+                                   f"{tiers.LIMITS['standard']['cards']} cards a day — or come back tomorrow. ⚓")
         self.last[key] = time.time()
         self.send(chat, f"🔍 Analyzing… ({self.jobs.qsize()} ahead of you, may take 1-3 minutes)")
-        self.jobs.put((chat, addr))
+        self.jobs.put((chat, addr, user, tier))
+
+    def link(self, chat, user):
+        msg = self.store.start_link(user)
+        page, phantom = tiers.verify_urls(msg, self.username)
+        self.send(chat, "🔗 <b>Link your wallet</b>\n\n1. Open the signing page in Phantom and tap <b>Sign</b>.\n"
+                        "2. Copy the <code>/verify …</code> line it shows and send it here.\n\n"
+                        "Signing a message is <b>not</b> a transaction: it cannot move funds or approve anything. "
+                        "The link expires in 15 minutes.",
+                  {"inline_keyboard": [[{"text": "✍️ Sign in Phantom", "url": phantom}],
+                                       [{"text": "🌐 Open signing page", "url": page}]]})
+
+    def verify(self, chat, user, args):
+        if len(args) != 2 or not ADDR.match(args[0]):
+            return self.send(chat, "Usage: /verify &lt;wallet&gt; &lt;signature&gt; — start with /link.")
+        res = self.store.finish_link(user, args[0], args[1])
+        if res == "expired":
+            return self.send(chat, "That link request expired. Send /link to get a new one.")
+        if res == "bad":
+            return self.send(chat, "Signature check failed. Make sure you signed with the same wallet, then try /link again.")
+        self.store.tier(user, force=True)
+        self.send(chat, "✅ Wallet linked.\n\n" + self.tier_text(user))
+
+    def tier_text(self, user):
+        tier = self.store.tier(user)
+        u = self.store.user(user)
+        lim = tiers.LIMITS[tier]
+        cards = "unlimited" if lim["cards"] is None else f"{lim['cards']} a day"
+        hist = "full history" if lim["days"] is None else f"last {lim['days']} days"
+        lines = [f"🏷 Tier: <b>{tier.capitalize()}</b>"]
+        if u.get("wallet"):
+            w = u["wallet"]
+            lines.append(f"Wallet: <code>{w[:4]}…{w[-4:]}</code>" + (f" · $MBOUND held ≈ ${u['usd']:,.2f}" if "usd" in u else ""))
+        elif os.environ.get("MBOUND_MINT"):
+            lines.append("No wallet linked — /link to unlock Standard or Pro.")
+        else:
+            lines.append("Pre-launch: everyone gets Standard until $MBOUND launches.")
+        lines += [f"Cards: {cards} · Analysis: {hist}", "",
+                  "<b>Free</b> — 1 card/day, last 30 days",
+                  "<b>Standard</b> (hold $3 of $MBOUND) — 10 cards/day, 90 days, trade breakdown",
+                  "<b>Pro</b> (hold $25) — unlimited, full history, weekly report",
+                  "", "<i>Holdings are re-checked daily. Not financial advice.</i>"]
+        return "\n".join(lines)
+
+    def details(self, chat, user):
+        tier = self.store.tier(user)
+        if not tiers.LIMITS[tier]["details"]:
+            return self.send(chat, "The trade-by-trade breakdown is a Standard feature — hold $3 of $MBOUND and /link your wallet.")
+        if user not in self.reports:
+            return self.send(chat, "Run /regret &lt;wallet&gt; first, then ask for details.")
+        addr, r = self.reports[user]
+        if not r.events:
+            return self.send(chat, "No flagged trades on your last card. Clean sailing. ⚓")
+        names = {"early": "🧻 Early sell", "panic": "📉 Panic sell", "fomo": "🚀 FOMO buy"}
+        refs = {"early": "later peak", "panic": "3-day high", "fomo": "3-day low"}
+        lines = [f"📋 <b>Flagged trades</b> · <code>{addr[:4]}…{addr[-4:]}</code>", ""]
+        for ts, kind, sym, price, ref in sorted(r.events, reverse=True)[:15]:
+            day = time.strftime("%b %d %H:%M", time.gmtime(ts))
+            lines.append(f"{names[kind]} · <b>{html.escape(sym[:12])}</b> · {day} UTC\n"
+                         f"   at {fmt_price(price)} · {refs[kind]} {fmt_price(ref)}")
+        if len(r.events) > 15:
+            lines.append(f"\n…and {len(r.events) - 15} more.")
+        self.send(chat, "\n".join(lines))
+
+    def weekly(self):
+        """Pro kullanıcılara pazartesi 09:00 UTC'den sonra haftalık kart."""
+        while True:
+            try:
+                t = time.gmtime()
+                week = time.strftime("%G-W%V", t)
+                meta = self.store.d.setdefault("_meta", {})
+                if t.tm_wday == 0 and t.tm_hour >= 9 and meta.get("weekly") != week:
+                    meta["weekly"] = week
+                    self.store.save()
+                    for uid in self.store.pro_users():
+                        if self.store.tier(uid, force=True) == "pro":
+                            self.send(uid, "🗓 <b>Your weekly Regret Mirror</b>")
+                            self.jobs.put((uid, self.store.user(uid)["wallet"], uid, "pro"))
+            except Exception as e:
+                print(f"haftalık rapor hatası: {e}", flush=True)
+            time.sleep(600)
 
     def welcome(self, chat):
         try:
@@ -151,6 +257,7 @@ class Bot:
             self.send(chat, WELCOME, self.keyboard())
 
     def callback(self, q):
+        user = (q.get("from") or {}).get("id")
         try:
             requests.post(f"{self.api}/answerCallbackQuery", json={"callback_query_id": q["id"]}, timeout=30)
         except requests.RequestException:
@@ -163,9 +270,12 @@ class Bot:
             self.send(chat, FAQ[data])
         elif data == "/token":
             self.send(chat, token_info())
+        elif data == "/details" and user:
+            self.details(chat, user)
 
     def run(self):
         threading.Thread(target=self.worker, daemon=True).start()
+        threading.Thread(target=self.weekly, daemon=True).start()
         offset = None
         while True:
             try:

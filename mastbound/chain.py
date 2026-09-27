@@ -159,10 +159,13 @@ def symbol_of(mint):
     return cache[mint]
 
 
-def wallet_report(address, api_key, max_tokens=15):
+def wallet_report(address, api_key, max_tokens=15, days=None):
+    """days: yalnız son N günün işlemleri (kademe sınırı); None = tüm geçmiş."""
     from .analysis import analyze
     sol_px = prices(SOL)
     trades = to_trades(address, fetch_transactions(address, api_key), sol_px)
+    if days:
+        trades = [t for t in trades if t.ts >= time.time() - days * DAY]
     # en çok işlem yapılan token'lar (istek sınırı için)
     counts = {}
     for t in trades:

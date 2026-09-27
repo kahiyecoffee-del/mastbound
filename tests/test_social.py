@@ -71,8 +71,13 @@ def test_mention_replier_rules(tmp_path):
     assert len(x.sent) == social.X_REPLY_PER_USER    # kullanıcı başına günlük sınır
 
 
-def _bot():
+def _bot(tmp="/tmp/mb_test_users.json"):
+    import os
+    from mastbound import tiers
+    if os.path.exists(tmp):
+        os.remove(tmp)
     b = Bot("T", "H")
+    b.store = tiers.Store(tmp)
     b.username = "MBot"
     b.out = []
     b.send = lambda chat, text: b.out.append(text)
@@ -88,9 +93,9 @@ def test_group_commands():
     b.handle({"chat": grp, "from": {"id": 1}, "text": "/regret@otherbot " + addr})
     assert b.jobs.empty()
     b.handle({"chat": grp, "from": {"id": 1}, "text": "/regret@MBot " + addr})
-    assert b.jobs.get_nowait() == (-1, addr)
+    assert b.jobs.get_nowait()[:2] == (-1, addr)
     b.handle({"chat": grp, "from": {"id": 2}, "text": "/regret " + addr})
-    assert b.jobs.get_nowait() == (-1, addr)         # bekleme süresi kullanıcı başına
+    assert b.jobs.get_nowait()[:2] == (-1, addr)     # bekleme süresi kullanıcı başına
     b.handle({"chat": grp, "from": {"id": 1}, "text": "/safety"})
     assert "seed phrase" in b.out[-1]
     b.handle({"chat": grp, "from": {"id": 1}, "text": "/token"})
@@ -100,7 +105,7 @@ def test_group_commands():
 def test_private_plain_address():
     b = _bot()
     b.handle({"chat": {"id": 9, "type": "private"}, "from": {"id": 9}, "text": "7" * 43})
-    assert b.jobs.get_nowait() == (9, "7" * 43)
+    assert b.jobs.get_nowait() == (9, "7" * 43, 9, "standard")   # lansman öncesi herkes Standard
 
 
 def test_card_with_qr_and_caption():

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mastbound · Regret Mirror</title>
+<meta name="description" content="What did your paper hands cost you? Read-only Solana wallet behavior analysis.">
+<meta property="og:image" content="promo.png">
+<link rel="icon" href="logo.png">
+<style>
+  :root { --bg:#0a0d12; --line:#232a36; --ink:#f5f7fa; --ink2:#a0aab8; --ink3:#687280; --gold:#f0c45c; --up:#2ecc8a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:radial-gradient(1000px 600px at 90% -10%, rgba(240,196,92,.18), transparent 60%), var(--bg);
+         color:var(--ink); font:17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:32px 16px 56px; }
+  header { display:flex; align-items:center; gap:12px; }
+  header img { width:44px; }
+  .brand { font-weight:800; letter-spacing:.18em; } .sub { color:var(--gold); font-size:11px; letter-spacing:.24em; }
+  h1 { font-size:clamp(34px, 7vw, 60px); line-height:1.08; margin:56px 0 16px; }
+  h1 span { color:var(--gold); }
+  p.lead { color:var(--ink2); max-width:600px; }
+  .cta { display:inline-block; margin:18px 0 40px; background:var(--gold); color:#14110a; padding:15px 26px; border-radius:12px;
+         font-weight:700; text-decoration:none; }
+  img.hero { width:100%; border-radius:18px; border:1px solid var(--line); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin-top:32px; }
+  .tile { border:1px solid var(--line); border-radius:16px; padding:18px; background:rgba(255,255,255,.02); }
+  .tile b { display:block; margin-bottom:4px; } .tile span { color:var(--ink2); font-size:15px; }
+  footer { margin-top:40px; color:var(--ink3); font-size:14px; }
+</style>
+</head>
+<body>
+<main>
+  <header><img src="logo.png" alt=""><div><div class="brand">MASTBOUND</div><div class="sub">TIE YOURSELF TO THE MAST</div></div></header>
+  <h1>What did your <span>paper hands</span> cost you?</h1>
+  <p class="lead">The Regret Mirror reads any Solana wallet's public swap history and measures early sells, panic sells and FOMO buys — with a Paper Hands Score from 0 to 100.</p>
+  <a class="cta" href="https://t.me/Mastboundbot">Open the bot on Telegram</a>
+  <img class="hero" src="promo.png" alt="Regret Mirror card">
+  <div class="grid">
+    <div class="tile"><b>Read-only</b><span>No wallet connect, no transactions. Never a seed phrase or private key.</span></div>
+    <div class="tile"><b>Free · Standard · Pro</b><span>Hold $3 or $25 of $MBOUND to unlock more cards, deeper history and weekly reports.</span></div>
+    <div class="tile"><b>Ulysses Lock</b><span>Coming next: commit to your plan before the storm.</span></div>
+  </div>
+  <footer>Not financial advice. Mastbound measures past on-chain behavior only.</footer>
+</main>
+</body>
+</html>

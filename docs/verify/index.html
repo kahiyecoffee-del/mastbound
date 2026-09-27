@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mastbound · Link wallet</title>
+<link rel="icon" href="../logo.png">
+<style>
+  :root { --bg:#0a0d12; --card:#12161e; --line:#232a36; --ink:#f5f7fa; --ink2:#a0aab8; --ink3:#687280; --gold:#f0c45c; --up:#2ecc8a; --down:#f6465d; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; background:radial-gradient(900px 500px at 90% -10%, rgba(240,196,92,.18), transparent 60%), var(--bg);
+         color:var(--ink); font:16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:32px 16px 48px; }
+  header { display:flex; align-items:center; gap:12px; margin-bottom:28px; }
+  header img { width:44px; height:44px; }
+  .brand { font-weight:800; letter-spacing:.18em; }
+  .sub { color:var(--gold); font-size:11px; letter-spacing:.24em; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:18px; padding:22px; }
+  h1 { font-size:22px; margin:0 0 6px; }
+  p { color:var(--ink2); margin:0 0 16px; }
+  pre { white-space:pre-wrap; word-break:break-word; background:#0d1117; border:1px solid var(--line); border-radius:12px;
+        padding:14px; color:var(--ink2); font:13px/1.5 ui-monospace, Menlo, monospace; margin:0 0 18px; }
+  button, .btn { display:block; width:100%; padding:15px; border-radius:12px; border:0;
+                 cursor:pointer; text-align:center; text-decoration:none; font-family:inherit; font-size:16px; font-weight:600; line-height:1.2; }
+  .primary { background:var(--gold); color:#14110a; }
+  .ghost { background:transparent; color:var(--ink); border:1px solid var(--line); margin-top:10px; }
+  .ok { color:var(--up); } .err { color:var(--down); }
+  .safe { margin-top:18px; font-size:13px; color:var(--ink3); }
+  .safe b { color:var(--ink2); }
+  #result { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <header><img src="../logo.png" alt=""><div><div class="brand">MASTBOUND</div><div class="sub">LINK WALLET</div></div></header>
+  <div class="card">
+    <div id="step1">
+      <h1>Prove wallet ownership</h1>
+      <p>Phantom will ask you to <b>sign this message</b>. It is not a transaction and cannot move funds or approve anything.</p>
+      <pre id="msg">Loading…</pre>
+      <button class="primary" id="sign">Connect &amp; sign</button>
+      <a class="btn ghost" id="openPhantom" style="display:none">Open in Phantom app</a>
+      <p id="status" style="margin:14px 0 0"></p>
+    </div>
+    <div id="result">
+      <h1 class="ok">Signed ✓</h1>
+      <p>Copy this line and send it to the bot in Telegram:</p>
+      <pre id="cmd"></pre>
+      <button class="primary" id="copy">Copy</button>
+      <a class="btn ghost" id="back">Back to Telegram</a>
+    </div>
+    <div class="safe"><b>Stay safe:</b> Mastbound never asks for your seed phrase or private key, and this page never requests a transaction.</div>
+  </div>
+</main>
+<script>
+const q = new URLSearchParams(location.search);
+const msg = q.get("m") || "";
+const bot = (q.get("bot") || "").replace(/[^A-Za-z0-9_]/g, "");
+const $ = id => document.getElementById(id);
+const status = (t, cls) => { $("status").textContent = t; $("status").className = cls || ""; };
+const valid = msg.startsWith("Mastbound wallet link\n") && msg.length < 400;
+$("msg").textContent = valid ? msg : "This link is invalid. Send /link to the Mastbound bot to get a new one.";
+if (!valid) $("sign").disabled = true;
+if (bot) $("back").href = "https://t.me/" + bot;
+const provider = () => (window.phantom && window.phantom.solana) || (window.solana && window.solana.isPhantom && window.solana);
+if (!provider()) {
+  const here = location.href;
+  const a = $("openPhantom");
+  a.href = "https://phantom.app/ul/browse/" + encodeURIComponent(here) + "?ref=" + encodeURIComponent(location.origin);
+  a.style.display = "block";
+}
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58(bytes) {
+  let n = 0n; for (const b of bytes) n = n * 256n + BigInt(b);
+  let s = ""; while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; }
+  for (const b of bytes) { if (b === 0) s = "1" + s; else break; }
+  return s;
+}
+$("sign").onclick = async () => {
+  const p = provider();
+  if (!p) { status("Phantom not found. Open this page in the Phantom app (button above) or install the Phantom extension.", "err"); return; }
+  try {
+    status("Waiting for Phantom…");
+    const { publicKey } = await p.connect();
+    const { signature } = await p.signMessage(new TextEncoder().encode(msg), "utf8");
+    $("cmd").textContent = "/verify " + publicKey.toString() + " " + b58(signature);
+    $("step1").style.display = "none"; $("result").style.display = "block";
+  } catch (e) { status("Cancelled or failed: " + (e && e.message ? e.message : e), "err"); }
+};
+$("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText($("cmd").textContent); $("copy").textContent = "Copied ✓"; }
+  catch { $("copy").textContent = "Select the text above and copy"; }
+};
+</script>
+</body>
+</html>
