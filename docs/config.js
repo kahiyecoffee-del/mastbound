@@ -2,6 +2,6 @@
 window.MASTBOUND = {
   bot: "Mastboundbot",
   mint: "",               // $MBOUND kontrat adresi (lansmandan sonra doldurulur)
-  referralAccount: "",    // Jupiter referral hesabı (referral.jup.ag) — ücret buraya gelir
+  referralAccount: "9ErChwKSjLz3upJvdoSQpJTJNMbYNbsKbus5dpQhnMLC",    // Jupiter referral hesabı (referral.jup.ag) — ücret buraya gelir
   feeBps: 25              // platform ücreti: 25 bps = %0,25
 };
