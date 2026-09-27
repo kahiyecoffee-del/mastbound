@@ -18,7 +18,7 @@ Not financial advice.
 
 ## Launch +1h · founder transparency
 Founder allocation: {founder_pct}% bought at launch and locked until {unlock_date}. Lock proof: {lock_link}
-We earn from product fees (swap 0.25%) and the Bags creator fee — not from selling on you.
+We earn from product fees (swap 0.5%) and the Bags creator fee — not from selling on you.
 
 ## Launch +1 day · product
 New: Ulysses Pact. /pact <token> <days> — promise yourself not to sell, and get a storm alert when it dips 15%.
