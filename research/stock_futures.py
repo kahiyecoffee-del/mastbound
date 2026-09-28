@@ -36,7 +36,10 @@ TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "GOOG", "META", "NFL
            "HOOD", "PLTR", "CRCL", "SPY", "QQQ", "AVGO", "ORCL", "UBER", "BABA", "SMCI", "ARM", "MU", "DIS", "JPM",
            "V", "MA", "WMT", "COST", "LLY", "UNH", "XOM", "BA", "NKE", "PYPL", "SHOP", "SQ", "XYZ", "RIVN", "LCID",
            "GME", "AMC", "IWM", "DIA", "GLD", "SLV", "TSM", "ASML", "CRWD", "SNOW", "NIO", "IBM", "CSCO", "ADBE"]
-SUFFIXES = ["STOCK", "X", "ON", "S", ""]
+SUFFIXES = ["STOCK", ""]
+# MEXC'de tam şirket adıyla listelenen kontratlar (discover çıktısından)
+ALIASES = {"NVIDIA_USDT": "NVDA", "TESLA_USDT": "TSLA", "COINBASE_USDT": "COIN", "ROBINHOOD_USDT": "HOOD",
+           "SPY_USDT": "SPY"}
 
 # Maliyet varsayımları (bps = 0.01%). MEXC güncel ücretleriyle değiştir: --taker-bps / --slip-bps
 TAKER_BPS = 2.0      # taraf başına
@@ -66,6 +69,8 @@ def contracts():
 def discover_pairs(items):
     """MEXC kontratlarından ABD hisse/ETF eşleşmeleri: {mexc_symbol: yahoo_ticker}"""
     pairs = {}
+    syms = {c.get("symbol") for c in items}
+    pairs.update({m: t for m, t in ALIASES.items() if m in syms})
     for c in items:
         sym = c.get("symbol", "")
         if not sym.endswith("_USDT"):
