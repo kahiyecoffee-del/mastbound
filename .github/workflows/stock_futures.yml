@@ -1,0 +1,41 @@
+name: stock-futures-research
+on:
+  workflow_dispatch:
+    inputs:
+      pairs:
+        description: "Elle eşleştirme (boş = otomatik): NVDASTOCK_USDT=NVDA,..."
+        required: false
+        default: ""
+      taker_bps:
+        description: "Taraf başı ücret (bps)"
+        required: false
+        default: "2"
+  push:
+    paths:
+      - "research/stock_futures.py"
+      - ".github/workflows/stock_futures.yml"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q requests pandas numpy
+      - name: discover
+        run: python research/stock_futures.py discover | tee discover.txt
+      - name: run
+        run: |
+          ARGS="--taker-bps ${{ github.event.inputs.taker_bps || '2' }}"
+          if [ -n "${{ github.event.inputs.pairs }}" ]; then ARGS="$ARGS --pairs ${{ github.event.inputs.pairs }}"; fi
+          python research/stock_futures.py run $ARGS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-futures-results
+          path: |
+            discover.txt
+            results/stock_futures/*.txt
+            results/stock_futures/*.csv
