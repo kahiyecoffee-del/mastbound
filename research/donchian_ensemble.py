@@ -54,7 +54,7 @@ def daily(coin, start="2019-01-01"):
     if not rows:
         return None
     df = pd.concat(rows).drop_duplicates("time").sort_values("time")
-    df.index = pd.to_datetime(df.pop("time"), unit="s", utc=True).normalize()
+    df.index = pd.DatetimeIndex(pd.to_datetime(df.pop("time"), unit="s", utc=True)).normalize()
     return df.astype(float)
 
 
