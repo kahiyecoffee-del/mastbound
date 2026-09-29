@@ -1,0 +1,39 @@
+name: quant-backtest
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Semboller (virgülle)"
+        default: "BTC_USDT,ETH_USDT,SOL_USDT"
+      interval:
+        description: "Min5 / Min15 / Min30 / Min60 / Hour4"
+        default: "Min15"
+      days:
+        default: "180"
+      extra:
+        description: "Ek argümanlar, örn: --fast 12 --slow 26 --trend 0 --no-short"
+        default: ""
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q requests
+      - env:
+          SYMBOLS: ${{ inputs.symbols }}
+          INTERVAL: ${{ inputs.interval }}
+          DAYS: ${{ inputs.days }}
+          EXTRA: ${{ inputs.extra }}
+        run: |
+          for s in ${SYMBOLS//,/ }; do
+            python -m quant.backtest --symbol "$s" --interval "$INTERVAL" --days "$DAYS" $EXTRA | tee -a backtest.txt
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: quant-backtest
+          path: backtest.txt

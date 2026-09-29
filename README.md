@@ -73,6 +73,11 @@ Keys live only in `/etc/mastbound.env` (chmod 600) — never in the repo.
 | `mastbound/bot.py` | Telegram bot |
 | `mastbound/social.py` | Scheduled posts, X client, mention replies |
 
+## Quant (MEXC futures bot)
+
+`quant/` is a separate EMA-cross + ATR-stop futures bot for MEXC that runs 24/7 on the VPS with an
+iPad-friendly web panel. Paper mode by default. See [quant/README.md](quant/README.md) (Turkish).
+
 Fonts: Inter and Space Grotesk, SIL Open Font License (`mastbound/fonts/`).
 
 *Not financial advice. Mastbound measures past on-chain behavior only.*

@@ -1,0 +1,16 @@
+[Unit]
+Description=MEXC vadeli quant botu (EMA + ATR) ve iPad paneli
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mastbound
+EnvironmentFile=/etc/mastbound-quant.env
+ExecStart=/opt/mastbound/venv/bin/python -u -m quant.engine
+Restart=always
+RestartSec=15
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
