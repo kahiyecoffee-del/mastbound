@@ -7,6 +7,8 @@ bot v8'e (EMA + DONCHIAN, funding hariç) etkisi. Başlangıç 670 USDT (canlı 
   D) DONCHIAN riske göre boyut (%0.5/%1/%1.5 risk, en fazla 1–3 pozisyon) — şu an sabit %50 pay
   E) düşüş freni: bakiye zirveden %X düşünce yeni işlemlerin riski yarıya
   F) birleşik adaylar
+  I) EMA ANALİZİ: EMA ve DONCHIAN ayrı ayrı (işlem başı net R), EMA kapalıyken pay dağılımı, EMA maliyet/kalite
+     varyantları (çıkış limit ücretiyle — iyimser üst sınır; yalnız BTC trendi yönünde; yalnız long / short)
   H) funding payı: bakiyenin %25 / 33 / 50 / 60 / 75'i funding'e (mevcut bot ve aynı yön tavanı 2 ile)
   G) FUNDING karşıtı L/S (canlı kural: 14g funding, 5+5 coin, 3 günde yenileme, %25 kâr al + yeniden aç, 1x)
      tek başına (eski / gerçek ücret) ve her senaryo "bot (2/3) + funding (1/3)" olarak (canlıdaki pay; günlük denge)
@@ -45,7 +47,8 @@ FUND_ALLOC = 1 / 3
 
 
 def run_pf2(cands, fees=REAL, risk=0.01, lev=2.0, k_ema=3, k_don=1, don_mode="alloc", don_alloc=0.5,
-            don_lev=1.0, don_risk=0.01, dir_cap=None, brake=None, start_bal=670.0):
+            don_lev=1.0, don_risk=0.01, dir_cap=None, brake=None, start_bal=670.0, ema_on=True, don_on=True,
+            ema_exit_fee=None, ema_filter=None):
     """research_quant.run_pf + kurallar. brake=(dd_esik, carpan): kapanmış bakiye zirveden dd_esik kadar
     düşükken yeni işlemlerin boyutu × carpan. dir_cap: aynı yönde (EMA+DON) en fazla bu kadar açık pozisyon."""
     ad = Adaptive()
@@ -75,6 +78,9 @@ def run_pf2(cands, fees=REAL, risk=0.01, lev=2.0, k_ema=3, k_don=1, don_mode="al
         if bal <= 0:
             break
         s = c["strat"]
+        if (s == "EMA" and (not ema_on or (ema_filter is not None and not ema_filter(c)))) or \
+                (s == "DONCHIAN" and not don_on):
+            continue
         cap = k_ema if s == "EMA" else k_don
         if sum(p[2]["strat"] == s for p in open_) >= cap or any(p[2]["coin"] == c["coin"] for p in open_):
             continue
@@ -101,7 +107,8 @@ def run_pf2(cands, fees=REAL, risk=0.01, lev=2.0, k_ema=3, k_don=1, don_mode="al
             continue
         qty = notional / c["entry"]
         fee_in = mk if (s == "EMA" and c.get("maker_entry", False)) else tk
-        pnl = qty * c["dir"] * (c["exit"] - c["entry"]) - fee_in * notional - tk * qty * c["exit"] - qty * c["funding_px"]
+        fee_out = ema_exit_fee if (s == "EMA" and ema_exit_fee is not None) else tk
+        pnl = qty * c["dir"] * (c["exit"] - c["entry"]) - fee_in * notional - fee_out * qty * c["exit"] - qty * c["funding_px"]
         pnl = max(pnl, -notional / lv)
         if s == "EMA":
             per_day[D] = per_day.get(D, 0) + 1
@@ -298,6 +305,63 @@ def main():
         rows.append(r)
         print(f"{name}: CAGR {m['cagr']:.1f}% gerçekDD {r['gerçek maxDD%']:.1f}%", flush=True)
     df = pd.DataFrame(rows)
+    # ---- I) EMA analizi
+    bc = closes["BTC"].copy()
+    bc.index = bc.index.tz_convert("UTC") if bc.index.tz else bc.index.tz_localize("UTC")
+    up = (bc > bc.ewm(span=200, adjust=False).mean()).astype(int)
+    up.index = up.index + pd.Timedelta("1D")                  # günlük kapanışta bilinir
+
+    def btc_ok(c):
+        u = up.asof(c["entry_time"])
+        return bool(u) if c["dir"] == 1 else not bool(u)
+
+    def sleeve(kw):
+        tr_, _ = run_pf2(cands, **kw)
+        m_ = mtm_dd(tr_, closes, A, Z, 670.0)
+        b_ = m_.pct_change().fillna(0.0)
+        b_.index = b_.index.tz_convert("UTC") if b_.index.tz else b_.index.tz_localize("UTC")
+        return tr_, b_.reindex(idx).fillna(0.0), m_
+
+    def rstats(tr_, strat, a, z):
+        rs = [r_multiple(t["pnl"], t["qty"], t["entry"], t["stop"]) for t in tr_
+              if t["strat"] == strat and a <= t["entry_time"] < z]
+        return (len(rs), float(np.mean(rs)) if rs else np.nan, float(np.mean(np.array(rs) > 0) * 100) if rs else np.nan)
+
+    base = dict(dir_cap=2)
+    tr_b, _, _ = sleeve(base)
+    irows = []
+    for strat, lab in (("EMA", "EMA"), ("DONCHIAN", "DONCHIAN")):
+        n, ar, w = rstats(tr_b, strat, A, Z)
+        row = {"strateji": lab, "işlem": n, "isabet%": w, "ort. net R": ar,
+               "net kâr USDT": sum(t["pnl"] for t in tr_b if t["strat"] == strat)}
+        for pl, a, z in periods:
+            n_, ar_, _ = rstats(tr_b, strat, a, z)
+            row[f"{pl} n"], row[f"{pl} ort.R"] = n_, ar_
+        irows.append(row)
+    I_SC = [("Mevcut (EMA+DON) · funding %50", base, 0.5),
+            ("EMA KAPALI, DON %50 pay · funding %50", dict(base, ema_on=False), 0.5),
+            ("EMA KAPALI, DON %100 pay (1x) · funding %50", dict(base, ema_on=False, don_alloc=1.0), 0.5),
+            ("EMA KAPALI, DON %50 pay · funding %67", dict(base, ema_on=False), 2 / 3),
+            ("Yalnız EMA (DON kapalı) · funding %50", dict(base, don_on=False), 0.5),
+            ("EMA çıkışı limit ücretli (%0.06, iyimser) · funding %50", dict(base, ema_exit_fee=REAL[0]), 0.5),
+            ("EMA yalnız BTC trendi yönünde · funding %50", dict(base, ema_filter=btc_ok), 0.5),
+            ("EMA yalnız LONG · funding %50", dict(base, ema_filter=lambda c: c["dir"] == 1), 0.5),
+            ("EMA yalnız SHORT · funding %50", dict(base, ema_filter=lambda c: c["dir"] == -1), 0.5)]
+    jrows = []
+    for lab, kw, fa in I_SC:
+        tr_, b_, m_ = sleeve(kw)
+        sl = curve_stats(b_, A, Z)
+        comb = (1 - fa) * b_ + fa * fr_real
+        cs_ = curve_stats(comb, A, Z)
+        yr = {yl: curve_stats(comb, a, z, 100.0)["final"] - 100 for yl, a, z in years}
+        n_e, ar_e, _ = rstats(tr_, "EMA", A, Z)
+        jrows.append({"senaryo": lab, "EMA işlem": n_e, "EMA ort.R": ar_e,
+                      "EMA+DON CAGR%": sl["cagr"], "EMA+DON DD%": DD.dd(m_),
+                      "TÜM BOT CAGR%": cs_["cagr"], "TÜM BOT maxDD%": cs_["dd"],
+                      "TÜM BOT SON YIL 100→": curve_stats(comb, T_, Z, 100.0)["final"],
+                      "en kötü yıl %": min(yr.values())})
+        print(f"I) {lab}: tüm bot CAGR {cs_['cagr']:.1f}", flush=True)
+
     hrows = []
     for sname in ("A1 mevcut bot — GERÇEK ücret (%0.06/%0.08)", "C aynı yön tavanı 2"):
         for fa in (0.25, 1 / 3, 0.5, 0.6, 0.75):
@@ -327,6 +391,10 @@ def main():
            .round(1).to_string(index=False),
            "", "H) FUNDING PAYI — tüm bot, gerçek ücret, günlük denge:",
            pd.DataFrame(hrows).round(1).to_string(index=False),
+           "", "I) EMA ANALİZİ — aynı yön tavanı 2, gerçek ücret. EMA ve DONCHIAN ayrı ayrı (işlem başı net R):",
+           pd.DataFrame(irows).round(3).to_string(index=False), "",
+           "I) EMA KAPALI / EMA VARYANTLARI — tüm bot (funding dahil, günlük denge):",
+           pd.DataFrame(jrows).round(2).to_string(index=False),
            "", "Yıllık getiri % (yalnız EMA+DON):", df[["senaryo"] + [f"{y[0]} %" for y in years]].round(1).to_string(index=False), "",
            "OKUMA: bir kural ancak (1) CAGR/gerçekDD mevcut bottan (A1) iyiyse, (2) SON 1 YIL'da da iyiyse ve (3) komşu",
            "ayarlarda (B/C/D/E içindeki sıralar) tutarlıysa canlıya aday."]
