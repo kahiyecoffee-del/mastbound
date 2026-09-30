@@ -1,9 +1,9 @@
-name: portfolio-research
+name: retest15-research
 on:
   workflow_dispatch:
   push:
     paths:
-      - "research/momentum/research_portfolio.py"
+      - "research/momentum/research_15m_retest.py"
       - ".github/workflows/portfolio.yml"
 jobs:
   run:
@@ -22,9 +22,9 @@ jobs:
         with:
           path: research/momentum/data
           key: binance-vision-1m-37coin-v1
-      - run: python research_portfolio.py
+      - run: python research_15m_retest.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: portfolio-results
-          path: research/momentum/results/portfolio/summary.txt
+          name: retest15-results
+          path: research/momentum/results/retest15/summary.txt
