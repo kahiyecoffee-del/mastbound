@@ -45,6 +45,10 @@ PPY = 252          # yıllık işlem günü (kripto bölümünde 365)
 CRYPTO = ["BTC-USD", "ETH-USD", "BNB-USD", "XRP-USD", "SOL-USD", "ADA-USD", "DOGE-USD", "LTC-USD", "LINK-USD",
           "AVAX-USD", "DOT-USD", "TRX-USD", "BCH-USD", "XLM-USD", "ATOM-USD"]
 CRYPTO_COST = 0.001  # MEXC taker %0.08 + kayma %0.02
+# MEXC'de hisse perpetual'ı olan büyük ABD hisseleri (stock_futures.py discover listesinden)
+STOCKS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "AMD", "INTC", "AVGO", "ORCL", "JPM", "V",
+          "MA", "WMT", "COST", "LLY", "UNH", "XOM", "BA", "NKE", "DIS", "IBM", "CSCO", "ADBE", "MU", "TSM", "BABA",
+          "COIN", "MSTR", "PLTR", "UBER", "SHOP"]
 LINES = []
 
 
@@ -239,7 +243,7 @@ def run_modern(C, rf, F, target=0.20, idm=2.0, cluster=False, buffer=0.0, cost=C
 
 # ------------------------------------------------------------------ T) olay bazlı Turtle
 def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False, cost=COST, gross_cap=5.0,
-               s1=20, s2=55, x1=10, x2=20, clusters=None,
+               s1=20, s2=55, x1=10, x2=20, clusters=None, long_only=False,
                cap_market=4, cap_cluster=6, cap_dir=12):
     O, H, L, C = (px[k] for k in ("open", "high", "low", "close"))
     cols = list(C.columns)
@@ -327,7 +331,7 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
                     up, dn = h > lv[("hi", ln)][t, i], l < lv[("lo", ln)][t, i]
                     if up and not dn:
                         sig = (sysn, 1, lv[("hi", ln)][t, i])
-                    elif dn and not up:
+                    elif dn and not up and not long_only:
                         sig = (sysn, -1, lv[("lo", ln)][t, i])
                     if sig:
                         break
@@ -519,6 +523,7 @@ def main():
                 out(f"      {nm:11s} {lab} {(1 + rr).prod() - 1:+.1%}  (SPY {(1 + sp).prod() - 1:+.1%}{bb})")
 
     crypto_section()
+    stock_section()
 
     with open(os.path.join(OUT, "report.txt"), "w") as f:
         f.write("\n".join(LINES) + "\n")
@@ -556,8 +561,10 @@ def crypto_section():
         ("K3 HIZLI Turtle 5/20, çıkış 3/10", dict(s1=5, s2=20, x1=3, x2=10)),
         ("K4 HIZLI Turtle, eklemesiz", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False)),
         ("K5 HIZLI Turtle, eklemesiz, risk %0.5", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False, risk=0.005)),
+        ("K4b K4, kayma taraf başı %0.3 (kırılım kayması)", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False, cost=0.003)),
+        ("K2b K2, kayma taraf başı %0.3", dict(pyramid=False, cost=0.003)),
     ]:
-        ret, tr = run_turtle(px, rf0, **base, **kw)
+        ret, tr = run_turtle(px, rf0, **{**base, **kw})
         res[name] = ret
         row(name, ret, rf0, f"işlem {len(tr)}, kazanan %{(tr > 0).mean() * 100:.0f}")
     for name, F in [
@@ -578,6 +585,71 @@ def crypto_section():
     keys = {"K1": "K1 Turtle orijinal 20/55", "K3": "K3 HIZLI Turtle 5/20, çıkış 3/10", "K4": "K4 HIZLI Turtle, eklemesiz",
             "K6": "K6 HIZLI 5/3 kırılım + oynaklık hedefi", "K7": "K7 20/10 kırılım + oynaklık hedefi (≈ bizim DON)",
             "K10": "K10 yavaş ensemble (20-320 + EWMAC 8-64) + tampon", "BTC": "BTC"}
+    Y = pd.DataFrame({k: yearly(res[v]) for k, v in keys.items()})
+    out(Y.to_string(float_format=lambda v: f"{v:7.1%}"))
+
+
+def stock_section():
+    """Tek tek ABD hisseleri (MEXC hisse perpetual'larının dayanağı). DİKKAT: bugünün büyük şirketleri seçildi →
+    hayatta kalma yanlılığı (al-tut ve long taraf abartılı çıkar); eşit ağırlıklı al-tut bu yanlılığın ölçüsüdür."""
+    global PPY, IS_END
+    PPY, IS_END = 252, "2018-12-31"
+    out("\n5) TEK TEK HİSSELER (MEXC hisse vadelilerinin dayanağı, 2010+, taraf başı 5 bps, artık getiri; IS ≤ 2018)")
+    data = {}
+    for tk in STOCKS + ["SPY"]:
+        try:
+            data[tk] = yahoo(tk)
+        except Exception as e:  # noqa: BLE001
+            out(f"  ! {tk} indirilemedi: {e}")
+    cal = data["SPY"].index
+    cal = cal[cal >= pd.Timestamp("2010-01-01")]
+    spy_c = data.pop("SPY")["close"].reindex(cal)
+    px = {k: pd.DataFrame({tk: d[k].reindex(cal) for tk, d in data.items()}) for k in ("open", "high", "low", "close")}
+    C = px["close"]
+    try:
+        irx = yahoo("^IRX")["close"].reindex(cal).ffill().fillna(0.0)
+    except Exception:  # noqa: BLE001
+        irx = pd.Series(0.0, index=cal)
+    rf = (irx / 100.0 / 252.0).clip(lower=0.0)
+    cl = {tk: "hisse" for tk in C.columns}
+    out(f"  {len(C.columns)} hisse; geç başlayanlar: " + ", ".join(
+        f"{tk} {C[tk].first_valid_index().date()}" for tk in C.columns if C[tk].first_valid_index() > cal[300]))
+    out(f"{'':44s} {'CAGR':>7s} {'Oyn.':>6s} {'Shrp':>5s} {'MaksDD':>7s} | {'IS-S':>5s} {'OOS-S':>5s} "
+        f"{'OOS-CAGR':>7s} {'OOS-DD':>7s} | {'Son12a':>7s} {'EnKötüY':>7s} | {'%20oynaklıkta CAGR/DD':>14s}")
+    res = {}
+    base = dict(cost=COST, clusters=cl, cap_cluster=12)
+    fast = dict(s1=5, s2=20, x1=3, x2=10)
+    for name, kw in [
+        ("H1 Turtle orijinal 20/55, eklemesiz", dict(pyramid=False)),
+        ("H2 HIZLI Turtle 5/20, eklemeli", dict(**fast)),
+        ("H3 HIZLI Turtle 5/20, eklemesiz", dict(**fast, pyramid=False)),
+        ("H4 HIZLI 5/20, eklemesiz, risk %0.5", dict(**fast, pyramid=False, risk=0.005)),
+        ("H5 HIZLI 5/20, eklemesiz, YALNIZ LONG", dict(**fast, pyramid=False, long_only=True)),
+        ("H6 Turtle 20/55, eklemesiz, YALNIZ LONG", dict(pyramid=False, long_only=True)),
+        ("H3b H3, kayma taraf başı %0.2", dict(**fast, pyramid=False, cost=0.002)),
+        ("H5b H5, kayma taraf başı %0.2", dict(**fast, pyramid=False, long_only=True, cost=0.002)),
+    ]:
+        ret, tr = run_turtle(px, rf, **{**base, **kw})
+        res[name] = ret
+        row(name, ret, rf, f"işlem {len(tr)}, kazanan %{(tr > 0).mean() * 100:.0f}")
+    for name, F in [
+        ("H7 HIZLI 5/3 kırılım + oynaklık hedefi", turtle_binary(C, 5, 3)),
+        ("H8 HIZLI 20/10 kırılım + oynaklık hedefi", turtle_binary(C, 20, 10)),
+    ]:
+        ret, turn, _ = run_modern(C, rf, F, idm=1.5)
+        res[name] = ret
+        row(name, ret, rf, f"yıllık ciro {turn:.0f}×")
+    first = res["H3 HIZLI Turtle 5/20, eklemesiz"].index[0]
+    ew = C.pct_change(fill_method=None).mean(axis=1).fillna(0.0)
+    res["EW"] = ew[ew.index >= first]
+    row("-- eşit ağırlık al-tut (yanlılık ölçüsü)", res["EW"], rf)
+    sp = spy_c.pct_change(fill_method=None).fillna(0.0)
+    res["SPY"] = sp[sp.index >= first]
+    row("-- SPY al-tut", res["SPY"], rf)
+    out("\n  Yıllık getiriler (hisseler):")
+    keys = {"H1": "H1 Turtle orijinal 20/55, eklemesiz", "H3": "H3 HIZLI Turtle 5/20, eklemesiz",
+            "H4": "H4 HIZLI 5/20, eklemesiz, risk %0.5", "H5": "H5 HIZLI 5/20, eklemesiz, YALNIZ LONG",
+            "EW": "EW", "SPY": "SPY"}
     Y = pd.DataFrame({k: yearly(res[v]) for k, v in keys.items()})
     out(Y.to_string(float_format=lambda v: f"{v:7.1%}"))
 
