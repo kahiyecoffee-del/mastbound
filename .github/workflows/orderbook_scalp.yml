@@ -1,0 +1,23 @@
+name: orderbook-scalp-research
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "research/orderbook_scalp.py"
+      - ".github/workflows/orderbook_scalp.yml"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q requests pandas numpy
+      - run: python research/orderbook_scalp.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: orderbook-scalp-results
+          path: results/orderbook_scalp/report.txt
