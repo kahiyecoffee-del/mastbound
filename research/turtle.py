@@ -255,6 +255,7 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
     last_c = np.full(K, np.nan)
     last_win = np.zeros(K, bool)
     trades = []
+    contrib = np.zeros(K)
     started = False
     for t in range(T):
         pnl = 0.0
@@ -265,6 +266,7 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
             o, h, l, c, n = O_[t, i], H_[t, i], L_[t, i], C_[t, i], N_[t, i]
             pc = last_c[i]
             p = pos[i]
+            pnl_before = pnl
             if p is not None:
                 d = p["dir"]
                 pnl -= p["qty"] * d * pc * rfv[t]
@@ -330,7 +332,9 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
                         fp = max(o, lvl) if d > 0 else min(o, lvl)
                         st = fp - 2 * n * d
                         p = dict(dir=d, qty=uq, uq=uq, units=1, sys=sysn, stop=st, last=fp, Ne=n, ext=fp, tpnl=0.0)
-                        if (l <= st) if d > 0 else (h >= st):   # aynı gün stop — temkinli say
+                        # aynı gün stop: gün içi sıra bilinmez; kapanış stopun ötesindeyse stop olmuş say
+                        # (dip kırılımdan ÖNCE de oluşmuş olabilir — low'a bakmak sistematik ceza verir)
+                        if (c <= st) if d > 0 else (c >= st):
                             g = uq * d * (st - fp) - cost * uq * (fp + st)
                             pnl += g
                             trades.append(g)
@@ -344,6 +348,7 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
                             if not pyramid:
                                 p["units"] = cap_market
             last_c[i] = c
+            contrib[i] += (pnl - pnl_before) / E0
             started = True
         E = E0 + pnl + E0 * rfv[t]
         if E <= 0:
@@ -352,6 +357,7 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
     eqs = pd.Series(eq, index=C.index).dropna()
     ret = eqs.pct_change().dropna()
     first = N.notna().any(axis=1).idxmax()
+    run_turtle.contrib = dict(zip(cols, contrib))
     return ret[ret.index > first], np.array(trades)
 
 
@@ -423,6 +429,7 @@ def main():
     out("\n1) SONUÇLAR (IS = 2018'e kadar, OOS = 2019+ örneklem dışı; son iki sütun: aynı %20 oynaklığa ölçekli)")
     out(hdr)
     res = {}
+    contribs = {}
 
     variants_T = [
         ("T1 Turtle orijinal (S1+S2, ekleme, 2N)", dict()),
@@ -435,6 +442,9 @@ def main():
         ret, tr = run_turtle(px, rf, **kw)
         res[name] = ret
         row(name, ret, rf, f"işlem {len(tr)}, kazanan %{(tr > 0).mean() * 100:.0f}")
+        if name.startswith("T1") or name.startswith("T2"):
+            cb = run_turtle.contrib
+            contribs[name[:2]] = cb
 
     Fb = turtle_binary(C)
     Fbe = forecasts(C, "breakout_ens")
@@ -461,6 +471,9 @@ def main():
     spy = C["SPY"].pct_change(fill_method=None)
     res["-- SPY al-tut"] = spy[spy.index >= res["M7 M6 + %10 tampon (az işlem)"].index[0]].fillna(0.0)
     row("-- SPY al-tut (karşılaştırma)", res["-- SPY al-tut"], rf)
+
+    out("\n1b) TURTLE PİYASA KATKISI (günlük P&L / bakiye toplamı, bileşiksiz; veri hatası kontrolü)")
+    out(pd.DataFrame(contribs).T.to_string(float_format=lambda v: f"{v:6.2f}"))
 
     out("\n2) YILLIK GETİRİLER")
     keys = ["T1 Turtle orijinal (S1+S2, ekleme, 2N)", "M2 Turtle 55/20 + oynaklık hedefi", "M5 M3+M4 ortalama",
