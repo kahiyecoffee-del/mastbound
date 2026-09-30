@@ -1,0 +1,30 @@
+name: portfolio-research
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "research/momentum/**"
+      - ".github/workflows/portfolio.yml"
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        working-directory: research/momentum
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q pandas numpy pyarrow matplotlib numba
+      - uses: actions/cache@v4
+        with:
+          path: research/momentum/data
+          key: binance-vision-1m-18coin-v1
+      - run: python research_portfolio.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: portfolio-results
+          path: research/momentum/results/portfolio/summary.txt
