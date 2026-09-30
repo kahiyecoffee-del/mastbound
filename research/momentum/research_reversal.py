@@ -173,7 +173,8 @@ def cands_rsi2(D, p):
         dn = (-dlt.clip(upper=0)).ewm(alpha=1 / 2, adjust=False).mean()
         rsi = (100 - 100 / (1 + up / dn.replace(0, np.nan))).to_numpy()
         s200 = cs.rolling(200).mean().to_numpy()
-        s5 = cs.rolling(5).mean().to_numpy()
+        s5 = cs.rolling(p.get("exit_n", 5)).mean().to_numpy()
+        max_d = p.get("max_d", 10)
         bok = btc_ok.reindex(df.index).fillna(False).to_numpy()
         t = df.index
         k = 200
@@ -182,7 +183,7 @@ def cands_rsi2(D, p):
                 i = k + 1
                 e = o[i]
                 j = i
-                while j < min(len(c) - 1, i + 10):
+                while j < min(len(c) - 1, i + max_d):
                     if c[j] > s5[j]:
                         break
                     j += 1
