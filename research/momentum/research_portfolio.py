@@ -362,6 +362,57 @@ def main():
                       "en kötü yıl %": min(yr.values())})
         print(f"I) {lab}: tüm bot CAGR {cs_['cagr']:.1f}", flush=True)
 
+    # ---- J) RSI(2) dip alımı kolu (research_reversal R4): sağlamlık + tüm bota ekleme
+    import research_reversal as RV
+    RV.FEE = REAL[1] + C.SLIPPAGE
+    Dd = {}
+    for n_, d_ in ohlc.items():
+        d_ = d_[~d_.index.duplicated()].copy()
+        d_.index = d_.index.tz_convert("UTC") if d_.index.tz else d_.index.tz_localize("UTC")
+        Dd[n_] = d_
+
+    def rsi_sleeve(p, f=0.2, K=5):
+        cands_r = RV.cands_rsi2(Dd, p)
+        r_, tk = RV.portfolio(cands_r, A, Z, f=f, K=K)
+        return r_.reindex(idx).fillna(0.0), tk
+
+    krows = []
+    for th in (3, 5, 7, 10):
+        for en in (3, 5):
+            for md in (5, 10):
+                for bf in (True, False):
+                    p = dict(th=th, btc=bf, exit_n=en, max_d=md)
+                    r_, tk = rsi_sleeve(p)
+                    row = {"RSI2 <": th, "çıkış SMA": en, "maks gün": md, "BTC filtresi": "evet" if bf else "hayır",
+                           "işlem": len(tk), "ort. net %": np.mean([x["ret"] for x in tk]) * 100 if tk else np.nan}
+                    for pl, a, z in periods:
+                        sp = curve_stats(r_, a, z, 100.0)
+                        x_ = r_[(r_.index >= a) & (r_.index < z)]
+                        row[f"{pl} CAGR%"] = sp["cagr"]
+                        row[f"{pl} Sharpe"] = x_.mean() / x_.std() * np.sqrt(365) if x_.std() > 0 else np.nan
+                    krows.append(row)
+    print("J) RSI2 sağlamlık tamam", flush=True)
+    base_b = br_by["C aynı yön tavanı 2"]
+    lrows = []
+    for lab, p, f, K in (("RSI2<5, SMA5, 10g, BTC filtreli · işlem %20 × 5", dict(th=5, btc=True), 0.2, 5),
+                         ("RSI2<5, SMA5, 10g, BTC filtreli · işlem %33 × 3", dict(th=5, btc=True), 1 / 3, 3),
+                         ("RSI2<10, SMA5, 10g, BTC filtreli · işlem %20 × 5", dict(th=10, btc=True), 0.2, 5)):
+        rr, _ = rsi_sleeve(p, f=f, K=K)
+        for wb, wf, wr in ((0.5, 0.5, 0.0), (0.4, 0.4, 0.2), (0.45, 0.35, 0.2), (0.35, 0.35, 0.3),
+                           (0.5, 0.5, 0.25), (0.5, 0.5, 0.5)):
+            comb = wb * base_b + wf * fr_real + wr * rr
+            cs_ = curve_stats(comb, A, Z)
+            row = {"RSI2 kolu": lab if wr else "— (mevcut bot)", "EMA+DON %": round(wb * 100),
+                   "funding %": round(wf * 100), "RSI2 %": round(wr * 100), "670→": cs_["final"],
+                   "CAGR%": cs_["cagr"], "maxDD%": cs_["dd"]}
+            for pl, a, z in periods:
+                sp = curve_stats(comb, a, z, 100.0)
+                row[f"{pl} 100→"], row[f"{pl} DD%"] = sp["final"], sp["dd"]
+            yr = {yl: curve_stats(comb, a, z, 100.0)["final"] - 100 for yl, a, z in years}
+            row["en kötü yıl %"] = min(yr.values())
+            lrows.append(row)
+    print("J) RSI2 tüm bot tamam", flush=True)
+
     hrows = []
     for sname in ("A1 mevcut bot — GERÇEK ücret (%0.06/%0.08)", "C aynı yön tavanı 2"):
         for fa in (0.25, 1 / 3, 0.5, 0.6, 0.75):
@@ -395,6 +446,12 @@ def main():
            pd.DataFrame(irows).round(3).to_string(index=False), "",
            "I) EMA KAPALI / EMA VARYANTLARI — tüm bot (funding dahil, günlük denge):",
            pd.DataFrame(jrows).round(2).to_string(index=False),
+           "", "J) RSI(2) DİP ALIMI — SAĞLAMLIK (tek başına; işlem başı %20 notional, en fazla 5; gerçek ücret):",
+           pd.DataFrame(krows).round(2).to_string(index=False), "",
+           "J) RSI(2) KOLU TÜM BOTA EKLENİNCE (EMA+DON = aynı yön tavanı 2; günlük denge; toplam %100'ü aşan satırlar",
+           "   RSI2'yi boşta duran bakiyeyle 'üstüne' kullanır):",
+           pd.DataFrame(lrows).drop_duplicates(subset=["EMA+DON %", "funding %", "RSI2 %", "CAGR%"]).round(1)
+           .to_string(index=False),
            "", "Yıllık getiri % (yalnız EMA+DON):", df[["senaryo"] + [f"{y[0]} %" for y in years]].round(1).to_string(index=False), "",
            "OKUMA: bir kural ancak (1) CAGR/gerçekDD mevcut bottan (A1) iyiyse, (2) SON 1 YIL'da da iyiyse ve (3) komşu",
            "ayarlarda (B/C/D/E içindeki sıralar) tutarlıysa canlıya aday."]
