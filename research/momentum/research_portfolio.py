@@ -412,6 +412,28 @@ def main():
             row["en kötü yıl %"] = min(yr.values())
             lrows.append(row)
     print("J) RSI2 tüm bot tamam", flush=True)
+    # yıl yıl: kollar ayrı ayrı ve birleşimler (her yıl 100'den başlar; DD = o yıl içi en büyük düşüş)
+    rr5, _ = rsi_sleeve(dict(th=5, btc=True))
+    ycols = {"EMA+DON (yön≤2) tek başına": base_b, "FUNDING tek başına": fr_real,
+             "RSI2<5 tek başına (işlem %20×5)": rr5,
+             "MEVCUT BOT (EMA+DON %50 + FUND %50)": 0.5 * base_b + 0.5 * fr_real,
+             "BOT + RSI2 %25 (boşta bakiyeyle)": 0.5 * base_b + 0.5 * fr_real + 0.25 * rr5,
+             "BOT + RSI2 %50 (boşta bakiyeyle)": 0.5 * base_b + 0.5 * fr_real + 0.5 * rr5}
+    yrows = []
+    for lab_, ser in ycols.items():
+        row = {"strateji": lab_}
+        for yl, a, z in years:
+            st = curve_stats(ser, a, z, 100.0)
+            row[f"{yl} %"] = st["final"] - 100
+            row[f"{yl} DD%"] = st["dd"]
+        tot = curve_stats(ser, A, Z)
+        row["670→ (tüm dönem)"], row["CAGR%"], row["maxDD%"] = tot["final"], tot["cagr"], tot["dd"]
+        yrows.append(row)
+    mrows = []
+    for lab_ in ("MEVCUT BOT (EMA+DON %50 + FUND %50)", "BOT + RSI2 %50 (boşta bakiyeyle)"):
+        m = (1 + ycols[lab_]).resample("ME").prod() - 1
+        mrows.append({"strateji": lab_, "kârlı ay": int((m > 0).sum()), "zararlı ay": int((m <= 0).sum()),
+                      "en iyi ay %": m.max() * 100, "en kötü ay %": m.min() * 100, "ort. ay %": m.mean() * 100})
 
     hrows = []
     for sname in ("A1 mevcut bot — GERÇEK ücret (%0.06/%0.08)", "C aynı yön tavanı 2"):
@@ -452,6 +474,10 @@ def main():
            "   RSI2'yi boşta duran bakiyeyle 'üstüne' kullanır):",
            pd.DataFrame(lrows).drop_duplicates(subset=["EMA+DON %", "funding %", "RSI2 %", "CAGR%"]).round(1)
            .to_string(index=False),
+           "", "J) YIL YIL — kollar ve tüm bot (her yıl 100'den başlar, '%' = o yılın getirisi, 'DD%' = yıl içi en büyük düşüş;",
+           "   2026 = 1 Ocak – 24 Eylül):",
+           pd.DataFrame(yrows).round(1).to_string(index=False), "",
+           "J) AYLIK DAĞILIM:", pd.DataFrame(mrows).round(1).to_string(index=False),
            "", "Yıllık getiri % (yalnız EMA+DON):", df[["senaryo"] + [f"{y[0]} %" for y in years]].round(1).to_string(index=False), "",
            "OKUMA: bir kural ancak (1) CAGR/gerçekDD mevcut bottan (A1) iyiyse, (2) SON 1 YIL'da da iyiyse ve (3) komşu",
            "ayarlarda (B/C/D/E içindeki sıralar) tutarlıysa canlıya aday."]
