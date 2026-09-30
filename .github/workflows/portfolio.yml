@@ -21,7 +21,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: research/momentum/data
-          key: binance-vision-1m-18coin-v1
+          key: binance-vision-1m-37coin-v1
       - run: python research_portfolio.py
       - uses: actions/upload-artifact@v4
         if: always()

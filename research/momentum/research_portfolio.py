@@ -7,6 +7,8 @@ bot v8'e (EMA + DONCHIAN, funding hariç) etkisi. Başlangıç 670 USDT (canlı 
   D) DONCHIAN riske göre boyut (%0.5/%1/%1.5 risk, en fazla 1–3 pozisyon) — şu an sabit %50 pay
   E) düşüş freni: bakiye zirveden %X düşünce yeni işlemlerin riski yarıya
   F) birleşik adaylar
+  G) FUNDING karşıtı L/S (canlı kural: 14g funding, 5+5 coin, 3 günde yenileme, %25 kâr al + yeniden aç, 1x)
+     tek başına (eski / gerçek ücret) ve her senaryo "bot (2/3) + funding (1/3)" olarak (canlıdaki pay; günlük denge)
 
 Adaylar (sinyal + çıkış) botun v8 kurallarıyla bir kez üretilir; kurallar yalnız portföy katmanında değişir.
 
@@ -28,6 +30,7 @@ import research_cvd as RC
 import research_daily_detail as DD
 import research_ema921 as E
 import research_fix3 as F
+import research_funding_tp as FT
 import research_ls as L
 from research_quant import Adaptive, r_multiple
 
@@ -35,6 +38,9 @@ DON_V7 = ((1.0, 0.1), (3.0, 1.0), None)
 BASE_V = (None, None, None)
 REAL = (0.0006, 0.0008)          # hesabın gerçek MEXC API ücretleri (2026-09 dolumları)
 OLD = (0.0002, 0.0005)           # önceki testlerin varsayımı
+FUND_EXTRA = ["ETC", "BCH", "XLM", "AAVE", "ICP", "HBAR", "INJ", "SAND", "MANA", "AXS", "EGLD", "ALGO", "VET", "CRV",
+              "COMP", "SNX", "RUNE", "THETA", "ARB"]   # canlı FUND_COINS = 18 bot coini + bunlar
+FUND_ALLOC = 1 / 3
 
 
 def run_pf2(cands, fees=REAL, risk=0.01, lev=2.0, k_ema=3, k_don=1, don_mode="alloc", don_alloc=0.5,
@@ -154,9 +160,65 @@ def build(args, A, Z, cache):
         em.append(dict(t, strat="EMA", size_mult=0.5 if sp > 5.0 else 1.0))
     cands = em + [dict(t, strat="DONCHIAN") for t in don[DON_V7]]
     closes = {n: c.tfs["1D"]["close"] for n, c in coins.items()}
+    ohlc, funds = {}, {}
+
+    def keep(name, c):
+        ohlc[name] = c.tfs["1D"][["open", "high", "low", "close"]].copy()
+        if c.funding is not None and len(c.funding):
+            f = pd.Series(np.asarray(c.funding, float), index=pd.DatetimeIndex(c.funding.index).tz_convert("UTC"))
+            funds[name] = f.resample("1D").sum()
+    for n, c in coins.items():
+        keep(n, c)
+    del coins
+    for name in ([] if args.synthetic else FUND_EXTRA):   # funding'in ek coinleri: yalnız günlük veri tutulur
+        a = argparse.Namespace(**vars(args))
+        a.coins = name
+        c = R.load(a, A, Z).get(name)
+        if c is not None:
+            keep(name, c)
+        del c
+    out = (cands, closes, ohlc, funds)
     with open(cache, "wb") as f:
-        pickle.dump((cands, closes), f)
-    return cands, closes
+        pickle.dump(out, f)
+    return out
+
+
+def funding_returns(ohlc, funds, cost):
+    """Canlı funding kuralının günlük getirisi (research_funding_tp.simulate; maliyet her açılış/kapanışta)."""
+    def panel(k):
+        return pd.DataFrame({n: d[k] for n, d in ohlc.items()}).sort_index()
+    Cl = panel("close")
+    Cl = Cl[~Cl.index.duplicated()]
+    O, H, Lo = (panel(k) for k in ("open", "high", "low"))
+    O, H, Lo = (X[~X.index.duplicated()].reindex(Cl.index) for X in (O, H, Lo))
+    FU = pd.DataFrame(funds).reindex(Cl.index).fillna(0.0)
+    listed = Cl.notna() & Cl.shift(30).notna()
+    fr = FU.rolling(14).mean().where(listed)
+    sel_long, sel_short = {}, {}
+    for d in Cl.index:
+        s_ = fr.loc[d].dropna()
+        if len(s_) >= 10:
+            sel_long[d], sel_short[d] = list(s_.nsmallest(5).index), list(s_.nlargest(5).index)
+    old = FT.COST
+    FT.COST = cost
+    try:
+        r = FT.simulate(O, H, Lo, Cl, FU, sel_long, sel_short, every=3, tp=0.25, mode="yeniden")
+    finally:
+        FT.COST = old
+    r.index = r.index.tz_convert("UTC") if r.index.tz else r.index.tz_localize("UTC")
+    return r
+
+
+def curve_stats(r, a, z, start=670.0):
+    r = r[(r.index >= a) & (r.index < z)]
+    eq = start * (1 + r).cumprod()
+    if eq.empty:
+        return dict(final=start, cagr=0.0, dd=0.0)
+    yrs = (z - a).days / 365.25
+    fin = float(eq.iloc[-1])
+    pk = np.maximum.accumulate(np.r_[start, eq.to_numpy()])
+    dd = float(((pk - np.r_[start, eq.to_numpy()]) / pk).max() * 100)
+    return dict(final=fin, cagr=((fin / start) ** (1 / yrs) - 1) * 100 if fin > 0 else -100.0, dd=dd)
 
 
 def mtm_dd(trades, closes, a, z, start_bal):
@@ -192,7 +254,19 @@ def main():
     years = [(str(y), pd.Timestamp(f"{y}-01-01", tz="UTC"), min(pd.Timestamp(f"{y + 1}-01-01", tz="UTC"), Z))
              for y in range(A.year, Z.year + 1) if pd.Timestamp(f"{y}-01-01", tz="UTC") < Z]
     cache = os.path.join(args.out, "adaylar_syn.pkl" if args.synthetic else "adaylar.pkl")
-    cands, closes = build(args, A, Z, cache)
+    cands, closes, ohlc, funds = build(args, A, Z, cache)
+    idx = pd.date_range(A, Z, freq="1D", inclusive="left", tz="UTC")
+    fr_real = funding_returns(ohlc, funds, REAL[1] + C.SLIPPAGE).reindex(idx).fillna(0.0)
+    fr_old = funding_returns(ohlc, funds, 0.0002 + C.SLIPPAGE).reindex(idx).fillna(0.0)
+    frows = []
+    for lab, fr_ in (("FUNDING tek başına — ESKİ maliyet (%0.04/işlem)", fr_old),
+                     ("FUNDING tek başına — GERÇEK maliyet (%0.10/işlem)", fr_real)):
+        st_ = curve_stats(fr_, A, Z)
+        row = {"strateji": lab, "670→": st_["final"], "CAGR%": st_["cagr"], "maxDD%": st_["dd"]}
+        for pl, a, z in periods:
+            sp = curve_stats(fr_, a, z, 100.0)
+            row[f"{pl} 100→"], row[f"{pl} DD%"] = sp["final"], sp["dd"]
+        frows.append(row)
     print(f"aday işlem: {len(cands)} (EMA {sum(c['strat'] == 'EMA' for c in cands)}, "
           f"DON {sum(c['strat'] == 'DONCHIAN' for c in cands)})", flush=True)
 
@@ -211,19 +285,32 @@ def main():
         for lab, a, z in years:
             ty, ey = run_pf2([c for c in cands if a <= c["entry_time"] < z], **kw)
             r[f"{lab} %"] = L.metrics(ty, ey, a, z, start_bal=670.0)["ret"]
+        br = mtm.pct_change().fillna(0.0)
+        br.index = br.index.tz_convert("UTC") if br.index.tz else br.index.tz_localize("UTC")
+        br = br.reindex(idx).fillna(0.0)
+        comb = (1 - FUND_ALLOC) * br + FUND_ALLOC * (fr_old if kw.get("fees") == OLD else fr_real)
+        cs_ = curve_stats(comb, A, Z)
+        r.update({"+FUND 670→": cs_["final"], "+FUND CAGR%": cs_["cagr"], "+FUND maxDD%": cs_["dd"],
+                  "+FUND SON 1 YIL 100→": curve_stats(comb, T_, Z, 100.0)["final"],
+                  "+FUND SON 1 YIL DD%": curve_stats(comb, T_, Z, 100.0)["dd"]})
         rows.append(r)
         print(f"{name}: CAGR {m['cagr']:.1f}% gerçekDD {r['gerçek maxDD%']:.1f}%", flush=True)
     df = pd.DataFrame(rows)
     df.to_csv(os.path.join(args.out, "sonuclar.csv"), index=False, float_format="%.4g")
     pc = [f"{lab} {k}" for lab, _, _ in periods for k in ("100→", "DD%")]
-    txt = ["PORTFÖY KURALLARI — bot v8 (EMA + DONCHIAN; funding stratejisi hariç), 18 coin, "
+    txt = ["PORTFÖY KURALLARI — bot v8 (EMA + DONCHIAN 18 coin) + FUNDING (37 coin), "
            f"{args.start} → {args.end}, başlangıç 670 USDT",
            "VERİ: SENTETİK" if args.synthetic else "Veri: Binance USDT-M 1dk + taker hacmi + funding (data.binance.vision)",
            "Ücret: A0 hariç GERÇEK MEXC API (limit giriş %0.06, piyasa giriş/çıkış %0.08); kayma %0.02/dolum ve funding dahil.",
            "Dönem sütunları her dönem 100'den ayrı başlar (son 1 yıl = hiç görülmemiş). gerçek maxDD = açık pozisyonlar "
            "dahil saatlik.", "",
            df[["senaryo", "670→", "CAGR%", "gerçek maxDD%", "en kötü gün %", "işlem"] + pc].round(1).to_string(index=False),
-           "", "Yıllık getiri %:", df[["senaryo"] + [f"{y[0]} %" for y in years]].round(1).to_string(index=False), "",
+           "", "G) FUNDING stratejisi tek başına (canlı kural):",
+           pd.DataFrame(frows).round(1).to_string(index=False), "",
+           "G) TÜM BOT = senaryo (bakiyenin 2/3'ü) + funding (1/3), günlük denge — canlıdaki düzen:",
+           df[["senaryo", "+FUND 670→", "+FUND CAGR%", "+FUND maxDD%", "+FUND SON 1 YIL 100→", "+FUND SON 1 YIL DD%"]]
+           .round(1).to_string(index=False),
+           "", "Yıllık getiri % (yalnız EMA+DON):", df[["senaryo"] + [f"{y[0]} %" for y in years]].round(1).to_string(index=False), "",
            "OKUMA: bir kural ancak (1) CAGR/gerçekDD mevcut bottan (A1) iyiyse, (2) SON 1 YIL'da da iyiyse ve (3) komşu",
            "ayarlarda (B/C/D/E içindeki sıralar) tutarlıysa canlıya aday."]
     text = "\n".join(txt)
