@@ -41,6 +41,10 @@ UNIVERSE = {
 }
 COST = 0.0005
 IS_END = "2018-12-31"
+PPY = 252          # yıllık işlem günü (kripto bölümünde 365)
+CRYPTO = ["BTC-USD", "ETH-USD", "BNB-USD", "XRP-USD", "SOL-USD", "ADA-USD", "DOGE-USD", "LTC-USD", "LINK-USD",
+          "AVAX-USD", "DOT-USD", "TRX-USD", "BCH-USD", "XLM-USD", "ATOM-USD"]
+CRYPTO_COST = 0.001  # MEXC taker %0.08 + kayma %0.02
 LINES = []
 
 
@@ -118,10 +122,10 @@ def stats(ret, rf):
     if len(ret) < 50:
         return None
     eq = (1 + ret).cumprod()
-    yrs = len(ret) / 252.0
+    yrs = len(ret) / float(PPY)
     ex = ret - rf.reindex(ret.index).fillna(0.0)
-    vol = ret.std() * np.sqrt(252)
-    sh = ex.mean() / ex.std() * np.sqrt(252) if ex.std() > 0 else np.nan
+    vol = ret.std() * np.sqrt(PPY)
+    sh = ex.mean() / ex.std() * np.sqrt(PPY) if ex.std() > 0 else np.nan
     dd = (eq / eq.cummax() - 1).min()
     return dict(cagr=eq.iloc[-1] ** (1 / yrs) - 1, vol=vol, sharpe=sh, dd=dd)
 
@@ -130,7 +134,7 @@ def norm(ret, rf, target=0.20):
     """Ex-post aynı oynaklığa (%20) ölçekle — yalnız varyantları karşılaştırmak için."""
     r = rf.reindex(ret.index).fillna(0.0)
     ex = ret - r
-    v = ex.std() * np.sqrt(252)
+    v = ex.std() * np.sqrt(PPY)
     return r + ex * (target / v) if v > 0 else ret
 
 
@@ -146,19 +150,20 @@ def forecasts(C, kind):
         return np.sign(C / C.shift(252) - 1)
     if kind.startswith("breakout"):
         f = 0
-        ns = [20, 40, 80, 160, 320] if kind == "breakout_ens" else [55]
+        ns = {"breakout_ens": [20, 40, 80, 160, 320], "breakout_fast": [5, 10, 20]}.get(kind, [55])
         for n in ns:
             hi, lo = C.rolling(n, min_periods=n).max(), C.rolling(n, min_periods=n).min()
             raw = ((C - (hi + lo) / 2) / (hi - lo).replace(0, np.nan)) * 2
             f = f + raw.ewm(span=max(2, n // 4)).mean()
         return (f / len(ns)).clip(-1, 1)
-    if kind == "ewmac_ens":
+    if kind in ("ewmac_ens", "ewmac_fast"):
         f = 0
-        for fast in (8, 16, 32, 64):
+        speeds = (8, 16, 32, 64) if kind == "ewmac_ens" else (2, 4, 8)
+        for fast in speeds:
             raw = (C.ewm(span=fast).mean() - C.ewm(span=4 * fast).mean()) / (C * sig_d)
             scale = raw.abs().expanding(min_periods=250).mean()
             f = f + (raw / scale * 0.5).clip(-1, 1)
-        return f / 4
+        return f / len(speeds)
     raise ValueError(kind)
 
 
@@ -190,7 +195,7 @@ def turtle_binary(C, entry=55, exit_=20):
 
 def run_modern(C, rf, F, target=0.20, idm=2.0, cluster=False, buffer=0.0, cost=COST, gross_cap=4.0):
     r = C.pct_change(fill_method=None)
-    sig = (r.ewm(span=35, min_periods=60).std() * np.sqrt(252)).clip(lower=0.03)
+    sig = (r.ewm(span=35, min_periods=60).std() * np.sqrt(PPY)).clip(lower=0.03)
     hist = C.notna().cumsum()
     active = (hist >= 260) & sig.notna() & C.notna()
     F = F.where(active, 0.0).fillna(0.0)
@@ -229,11 +234,12 @@ def run_modern(C, rf, F, target=0.20, idm=2.0, cluster=False, buffer=0.0, cost=C
     ret = rf + (W.shift(1) * x).sum(axis=1) - cost * turn
     first = active.any(axis=1).idxmax()
     ret = ret[ret.index >= first + pd.Timedelta(days=5)]
-    return ret, turn.reindex(ret.index).mean() * 252, W
+    return ret, turn.reindex(ret.index).mean() * PPY, W
 
 
 # ------------------------------------------------------------------ T) olay bazlı Turtle
 def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False, cost=COST, gross_cap=5.0,
+               s1=20, s2=55, x1=10, x2=20, clusters=None,
                cap_market=4, cap_cluster=6, cap_dir=12):
     O, H, L, C = (px[k] for k in ("open", "high", "low", "close"))
     cols = list(C.columns)
@@ -242,12 +248,12 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
     tr = tr.reindex(C.index)[cols]
     N = tr.ewm(alpha=1 / 20, min_periods=20).mean().shift(1)
     lv = {}
-    for n in (10, 20, 55):
+    for n in {s1, s2, x1, x2}:
         lv[("hi", n)] = H.rolling(n, min_periods=n).max().shift(1).to_numpy()
         lv[("lo", n)] = L.rolling(n, min_periods=n).min().shift(1).to_numpy()
     O_, H_, L_, C_, N_ = (a.to_numpy() for a in (O, H, L, C, N))
     rfv = rf.to_numpy()
-    clus = [UNIVERSE[c] for c in cols]
+    clus = [(clusters or UNIVERSE).get(c, "diğer") for c in cols]
     T, K = C_.shape
     E = 1.0
     eq = np.full(T, np.nan)
@@ -272,8 +278,8 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
                 pnl -= p["qty"] * d * pc * rfv[t]
                 exit_lvl = p["stop"]
                 if not chandelier:
-                    ch = lv[("lo", 10 if p["sys"] == 1 else 20)][t, i] if d > 0 else \
-                        lv[("hi", 10 if p["sys"] == 1 else 20)][t, i]
+                    xn = x1 if p["sys"] == 1 else x2
+                    ch = lv[("lo", xn)][t, i] if d > 0 else lv[("hi", xn)][t, i]
                     if not np.isnan(ch):
                         exit_lvl = max(exit_lvl, ch) if d > 0 else min(exit_lvl, ch)
                 hit = (l <= exit_lvl) if d > 0 else (h >= exit_lvl)
@@ -310,12 +316,12 @@ def run_turtle(px, rf, risk=0.01, pyramid=True, skip_rule=True, chandelier=False
                         if not np.isnan(n):
                             tr_ = p["ext"] - 3 * n * d
                             p["stop"] = max(p["stop"], tr_) if d > 0 else min(p["stop"], tr_)
-            elif not np.isnan(n) and n > 0 and not np.isnan(lv[("hi", 55)][t, i]):
+            elif not np.isnan(n) and n > 0 and not np.isnan(lv[("hi", s2)][t, i]):
                 sig = None
-                for sysn, ln in ((1, 20), (2, 55)):
+                for sysn, ln in ((1, s1), (2, s2)):
                     if sysn == 1 and skip_rule and last_win[i]:
                         # önceki S1 kârlıysa bu S1 sinyali atlanır; bayrak sıfırlanır (bir sonraki S1 alınır)
-                        if h > lv[("hi", 20)][t, i] or l < lv[("lo", 20)][t, i]:
+                        if h > lv[("hi", s1)][t, i] or l < lv[("lo", s1)][t, i]:
                             last_win[i] = False
                         continue
                     up, dn = h > lv[("hi", ln)][t, i], l < lv[("lo", ln)][t, i]
@@ -437,6 +443,9 @@ def main():
         ("T3 Turtle, atlama kuralı yok", dict(skip_rule=False)),
         ("T4 Turtle, çıkış = 3N iz süren stop", dict(chandelier=True)),
         ("T5 Turtle, risk %0.5", dict(risk=0.005)),
+        ("T6 HIZLI Turtle 5/20 giriş, 3/10 çıkış", dict(s1=5, s2=20, x1=3, x2=10)),
+        ("T7 HIZLI Turtle, eklemesiz", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False)),
+        ("T8 HIZLI Turtle, eklemesiz, risk %0.5", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False, risk=0.005)),
     ]
     for name, kw in variants_T:
         ret, tr = run_turtle(px, rf, **kw)
@@ -461,6 +470,10 @@ def main():
         ("M7 M6 + %10 tampon (az işlem)", dict(F=Fmix, cluster=True, buffer=0.1)),
         ("M8 M7, ücret 10 bps (hassasiyet)", dict(F=Fmix, cluster=True, buffer=0.1, cost=0.001)),
         ("M9 M7, yalnız long", dict(F=Fmix.clip(lower=0), cluster=True, buffer=0.1)),
+        ("M10 HIZLI 5/3 kırılım + oynaklık hedefi", dict(F=turtle_binary(C, 5, 3))),
+        ("M11 HIZLI 20/10 kırılım + oynaklık hedefi", dict(F=turtle_binary(C, 20, 10))),
+        ("M12 HIZLI ensemble (kırılım 5-20 + EWMAC 2-8) + tampon",
+         dict(F=(forecasts(C, "breakout_fast") + forecasts(C, "ewmac_fast")) / 2, cluster=True, buffer=0.1)),
     ]
     for name, kw in variants_M:
         F = kw.pop("F")
@@ -505,8 +518,68 @@ def main():
             if len(rr):
                 out(f"      {nm:11s} {lab} {(1 + rr).prod() - 1:+.1%}  (SPY {(1 + sp).prod() - 1:+.1%}{bb})")
 
+    crypto_section()
+
     with open(os.path.join(OUT, "report.txt"), "w") as f:
         f.write("\n".join(LINES) + "\n")
+
+
+def crypto_section():
+    """Aynı Turtle / hızlı Turtle kuralları kriptoda (Yahoo günlük, 7/24 takvim, MEXC ücreti, funding yok sayıldı)."""
+    global PPY, IS_END
+    PPY, IS_END = 365, "2022-12-31"
+    out("\n4) KRİPTO — AYNI KURALLAR (15 büyük coin, 2018+, taraf başı 10 bps; funding dahil DEĞİL; IS ≤ 2022, OOS 2023+)")
+    data = {}
+    for tk in CRYPTO:
+        try:
+            data[tk] = yahoo(tk)
+        except Exception as e:  # noqa: BLE001
+            out(f"  ! {tk} indirilemedi: {e}")
+    if "BTC-USD" not in data:
+        out("  BTC verisi yok — bölüm atlandı")
+        return
+    cal = data["BTC-USD"].index
+    cal = cal[cal >= pd.Timestamp("2018-01-01")]
+    px = {k: pd.DataFrame({tk: d[k].reindex(cal) for tk, d in data.items()}) for k in ("open", "high", "low", "close")}
+    C = px["close"]
+    rf0 = pd.Series(0.0, index=cal)
+    cl = {tk: "kripto" for tk in C.columns}
+    out("  coin başlangıçları: " + ", ".join(f"{tk[:-4]} {C[tk].first_valid_index().date()}" for tk in C.columns))
+    hdr = (f"{'':44s} {'CAGR':>7s} {'Oyn.':>6s} {'Shrp':>5s} {'MaksDD':>7s} | {'IS-S':>5s} {'OOS-S':>5s} "
+           f"{'OOS-CAGR':>7s} {'OOS-DD':>7s} | {'Son12a':>7s} {'EnKötüY':>7s} | {'%20oynaklıkta CAGR/DD':>14s}")
+    out(hdr)
+    res = {}
+    base = dict(cost=CRYPTO_COST, clusters=cl, cap_cluster=12)
+    for name, kw in [
+        ("K1 Turtle orijinal 20/55", dict()),
+        ("K2 Turtle orijinal, eklemesiz", dict(pyramid=False)),
+        ("K3 HIZLI Turtle 5/20, çıkış 3/10", dict(s1=5, s2=20, x1=3, x2=10)),
+        ("K4 HIZLI Turtle, eklemesiz", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False)),
+        ("K5 HIZLI Turtle, eklemesiz, risk %0.5", dict(s1=5, s2=20, x1=3, x2=10, pyramid=False, risk=0.005)),
+    ]:
+        ret, tr = run_turtle(px, rf0, **base, **kw)
+        res[name] = ret
+        row(name, ret, rf0, f"işlem {len(tr)}, kazanan %{(tr > 0).mean() * 100:.0f}")
+    for name, F in [
+        ("K6 HIZLI 5/3 kırılım + oynaklık hedefi", turtle_binary(C, 5, 3)),
+        ("K7 20/10 kırılım + oynaklık hedefi (≈ bizim DON)", turtle_binary(C, 20, 10)),
+        ("K8 55/20 kırılım + oynaklık hedefi", turtle_binary(C, 55, 20)),
+        ("K9 HIZLI ensemble + tampon", (forecasts(C, "breakout_fast") + forecasts(C, "ewmac_fast")) / 2),
+        ("K10 yavaş ensemble (20-320 + EWMAC 8-64) + tampon", (forecasts(C, "breakout_ens") + forecasts(C, "ewmac_ens")) / 2),
+    ]:
+        buf = 0.1 if "tampon" in name else 0.0
+        ret, turn, _ = run_modern(C, rf0, F, idm=1.2, buffer=buf, cost=CRYPTO_COST)
+        res[name] = ret
+        row(name, ret, rf0, f"yıllık ciro {turn:.0f}×")
+    btc = C["BTC-USD"].pct_change(fill_method=None).fillna(0.0)
+    res["BTC"] = btc[btc.index >= res["K10 yavaş ensemble (20-320 + EWMAC 8-64) + tampon"].index[0]]
+    row("-- BTC al-tut", res["BTC"], rf0)
+    out("\n  Yıllık getiriler (kripto):")
+    keys = {"K1": "K1 Turtle orijinal 20/55", "K3": "K3 HIZLI Turtle 5/20, çıkış 3/10", "K4": "K4 HIZLI Turtle, eklemesiz",
+            "K6": "K6 HIZLI 5/3 kırılım + oynaklık hedefi", "K7": "K7 20/10 kırılım + oynaklık hedefi (≈ bizim DON)",
+            "K10": "K10 yavaş ensemble (20-320 + EWMAC 8-64) + tampon", "BTC": "BTC"}
+    Y = pd.DataFrame({k: yearly(res[v]) for k, v in keys.items()})
+    out(Y.to_string(float_format=lambda v: f"{v:7.1%}"))
 
 
 if __name__ == "__main__":
