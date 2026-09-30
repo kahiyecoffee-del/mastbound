@@ -7,6 +7,7 @@ bot v8'e (EMA + DONCHIAN, funding hariç) etkisi. Başlangıç 670 USDT (canlı 
   D) DONCHIAN riske göre boyut (%0.5/%1/%1.5 risk, en fazla 1–3 pozisyon) — şu an sabit %50 pay
   E) düşüş freni: bakiye zirveden %X düşünce yeni işlemlerin riski yarıya
   F) birleşik adaylar
+  H) funding payı: bakiyenin %25 / 33 / 50 / 60 / 75'i funding'e (mevcut bot ve aynı yön tavanı 2 ile)
   G) FUNDING karşıtı L/S (canlı kural: 14g funding, 5+5 coin, 3 günde yenileme, %25 kâr al + yeniden aç, 1x)
      tek başına (eski / gerçek ücret) ve her senaryo "bot (2/3) + funding (1/3)" olarak (canlıdaki pay; günlük denge)
 
@@ -270,7 +271,7 @@ def main():
     print(f"aday işlem: {len(cands)} (EMA {sum(c['strat'] == 'EMA' for c in cands)}, "
           f"DON {sum(c['strat'] == 'DONCHIAN' for c in cands)})", flush=True)
 
-    rows = []
+    rows, br_by = [], {}
     for name, kw in scenarios():
         r = {"senaryo": name}
         tr, eq = run_pf2(cands, **kw)
@@ -288,6 +289,7 @@ def main():
         br = mtm.pct_change().fillna(0.0)
         br.index = br.index.tz_convert("UTC") if br.index.tz else br.index.tz_localize("UTC")
         br = br.reindex(idx).fillna(0.0)
+        br_by[name] = br
         comb = (1 - FUND_ALLOC) * br + FUND_ALLOC * (fr_old if kw.get("fees") == OLD else fr_real)
         cs_ = curve_stats(comb, A, Z)
         r.update({"+FUND 670→": cs_["final"], "+FUND CAGR%": cs_["cagr"], "+FUND maxDD%": cs_["dd"],
@@ -296,6 +298,19 @@ def main():
         rows.append(r)
         print(f"{name}: CAGR {m['cagr']:.1f}% gerçekDD {r['gerçek maxDD%']:.1f}%", flush=True)
     df = pd.DataFrame(rows)
+    hrows = []
+    for sname in ("A1 mevcut bot — GERÇEK ücret (%0.06/%0.08)", "C aynı yön tavanı 2"):
+        for fa in (0.25, 1 / 3, 0.5, 0.6, 0.75):
+            comb = (1 - fa) * br_by[sname] + fa * fr_real
+            cs_ = curve_stats(comb, A, Z)
+            row = {"EMA+DON kuralı": sname.split(" —")[0], "funding payı %": round(fa * 100),
+                   "670→": cs_["final"], "CAGR%": cs_["cagr"], "maxDD%": cs_["dd"]}
+            for pl, a, z in periods:
+                sp = curve_stats(comb, a, z, 100.0)
+                row[f"{pl} 100→"], row[f"{pl} DD%"] = sp["final"], sp["dd"]
+            yr = {lab: curve_stats(comb, a, z, 100.0)["final"] - 100 for lab, a, z in years}
+            row["en kötü yıl %"] = min(yr.values())
+            hrows.append(row)
     df.to_csv(os.path.join(args.out, "sonuclar.csv"), index=False, float_format="%.4g")
     pc = [f"{lab} {k}" for lab, _, _ in periods for k in ("100→", "DD%")]
     txt = ["PORTFÖY KURALLARI — bot v8 (EMA + DONCHIAN 18 coin) + FUNDING (37 coin), "
@@ -310,6 +325,8 @@ def main():
            "G) TÜM BOT = senaryo (bakiyenin 2/3'ü) + funding (1/3), günlük denge — canlıdaki düzen:",
            df[["senaryo", "+FUND 670→", "+FUND CAGR%", "+FUND maxDD%", "+FUND SON 1 YIL 100→", "+FUND SON 1 YIL DD%"]]
            .round(1).to_string(index=False),
+           "", "H) FUNDING PAYI — tüm bot, gerçek ücret, günlük denge:",
+           pd.DataFrame(hrows).round(1).to_string(index=False),
            "", "Yıllık getiri % (yalnız EMA+DON):", df[["senaryo"] + [f"{y[0]} %" for y in years]].round(1).to_string(index=False), "",
            "OKUMA: bir kural ancak (1) CAGR/gerçekDD mevcut bottan (A1) iyiyse, (2) SON 1 YIL'da da iyiyse ve (3) komşu",
            "ayarlarda (B/C/D/E içindeki sıralar) tutarlıysa canlıya aday."]
