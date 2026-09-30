@@ -14,6 +14,8 @@ Kurallar (15dk mum, yalnız kapanmış mumlar):
 Çıkış (1dk veriyle, aynı dakikada stop ve hedef → önce stop): TP 1.5R / 2R / 3R ya da 2×ATR iz süren stop; en fazla 24 saat.
 Maliyet: giriş piyasa %0.08 + kayma %0.02; TP limit %0.06; stop/süre piyasa %0.08 + kayma %0.02.
 
+  --tf 1h: aynı kurallar saatlik grafikte (stop ≤ %6, en fazla 72 saat tutma)
+  PORTFÖY: en fazla 3 eşzamanlı pozisyon, her biri bakiyenin 1/3'ü teminat × kaldıraç (1x / 2x / 5x) — sabit kaldıraç.
   python research_15m_retest.py              # Binance 1dk arşivi → results/retest15/
   python research_15m_retest.py --synthetic  # kod testi
 """
@@ -67,6 +69,10 @@ def features(df):
     return f
 
 
+TF = {"15min": dict(max_stop=0.03, hold_h=24), "1h": dict(max_stop=0.06, hold_h=72), "4h": dict(max_stop=0.10, hold_h=240)}
+CFG = TF["15min"]
+
+
 def setups(f, p):
     """Kurallara uyan girişler: [(giriş mumu idx, giriş fiyatı, stop)]"""
     n = len(f)
@@ -105,7 +111,7 @@ def setups(f, p):
                 break
             if c[e] > seg_hi and delta[e] > 0:
                 stop = seg_lo - 0.1 * atr[e]
-                if 0.0015 <= (c[e] - stop) / c[e] <= 0.03:
+                if 0.0015 <= (c[e] - stop) / c[e] <= CFG["max_stop"]:
                     out.append((e, c[e], stop))
                     busy_until = e
                 break
@@ -114,9 +120,9 @@ def setups(f, p):
 
 
 def exit_trade(mm, t_entry_ns, entry, stop, atr, ex):
-    """1dk veriyle çıkış. Dönen: (net R, çıkış zamanı ns)."""
+    """1dk veriyle çıkış. Dönen: (net R, çıkış zamanı ns, net getiri / giriş fiyatı)."""
     i0 = np.searchsorted(mm.t, t_entry_ns)
-    i1 = min(i0 + 24 * 60, len(mm.t))
+    i1 = min(i0 + CFG["hold_h"] * 60, len(mm.t))
     if i0 >= i1:
         return None
     hi, lo_ = mm.h[i0:i1], mm.l[i0:i1]
@@ -147,7 +153,35 @@ def exit_trade(mm, t_entry_ns, entry, stop, atr, ex):
             k = i1 - 1 - i0
             px, fee_out = mm.c[i1 - 1] * (1 - SLIP), TAKER
     pnl = px - fill - TAKER * fill - fee_out * px
-    return pnl / risk, mm.t[i0 + k]
+    return pnl / risk, mm.t[i0 + k], pnl / fill
+
+
+def portfolio(df, lev, slots=3, start=100.0):
+    """Sabit kaldıraç: aynı anda en fazla `slots` pozisyon, her biri (bakiye/slots) teminat × lev. Stoplar ≤ %6 olduğu için
+    5x'te bile (likidasyon ~%-19) stop likidasyondan önce gelir. Dönen: (son bakiye, maxDD %, eğri)."""
+    if df.empty:
+        return start, 0.0, pd.Series(dtype=float)
+    ev = df.sort_values("t_entry")
+    bal, open_, eq = start, [], []
+    for r in ev.itertuples():
+        open_.sort(key=lambda x: x[0])
+        while open_ and open_[0][0] <= r.t_entry:
+            t_x, pnl = open_.pop(0)
+            bal = max(bal + pnl, 0.0)
+            eq.append((t_x, bal))
+        if bal <= 0:
+            break
+        if len(open_) >= slots:
+            continue
+        notional = bal / slots * lev
+        open_.append((r.t_exit, notional * r.ret))
+    for t_x, pnl in sorted(open_, key=lambda x: x[0]):
+        bal = max(bal + pnl, 0.0)
+        eq.append((t_x, bal))
+    s_ = pd.Series([b for _, b in eq], index=[t for t, _ in eq]) if eq else pd.Series([start])
+    v = np.r_[start, s_.to_numpy()]
+    pk = np.maximum.accumulate(v)
+    return float(v[-1]), float(((pk - v) / np.where(pk > 0, pk, 1)).max() * 100), s_
 
 
 def stats(df):
@@ -169,8 +203,12 @@ def main():
     ap.add_argument("--synthetic", action="store_true")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--drift", type=float, default=0.0)
-    ap.add_argument("--out", default="results/retest15")
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--tf", default="15min", choices=list(TF))
     args = ap.parse_args()
+    global CFG
+    CFG = TF[args.tf]
+    args.out = args.out or ("results/retest15" if args.tf == "15min" else f"results/retest_{args.tf}")
     os.makedirs(args.out, exist_ok=True)
     A, Z = pd.Timestamp(args.start, tz="UTC"), pd.Timestamp(args.end, tz="UTC")
     V = variants()
@@ -182,39 +220,47 @@ def main():
         c = R.load(a, A, Z).get(name)
         if c is None:
             continue
-        df = c.tfs["15min"]
+        df = c.tfs[args.tf]
         df = df[(df.index >= A) & (df.index < Z)]
         f = features(df)
-        close_ns = (f.index + pd.Timedelta("15min")).as_unit("ns").asi8
+        close_ns = (f.index + pd.Timedelta(args.tf)).as_unit("ns").asi8
         atr = f["atr"].to_numpy(float)
         for vname, p in V:
             for e, px, stop in setups(f, p):
                 res = exit_trade(c.mm, close_ns[e], px, stop, atr[e], p["exit"])
                 if res is not None:
-                    trades[vname].append(dict(coin=name, t_entry=f.index[e] + pd.Timedelta("15min"),
-                                              t_exit=pd.Timestamp(res[1], tz="UTC"), R=res[0]))
+                    trades[vname].append(dict(coin=name, t_entry=f.index[e] + pd.Timedelta(args.tf),
+                                              t_exit=pd.Timestamp(res[1], tz="UTC"), R=res[0], ret=res[2]))
         print(f"[{name}] tamam ({time.time() - t0:.0f}s)", flush=True)
         del c
     rows = []
     for vname, _ in V:
-        df = pd.DataFrame(trades[vname], columns=["coin", "t_entry", "t_exit", "R"])
+        df = pd.DataFrame(trades[vname], columns=["coin", "t_entry", "t_exit", "R", "ret"])
         s = stats(df)
         row = {"varyant": vname, "işlem": s["n"], "isabet%": s["win"], "ort. net R": s["avgR"], "PF": s["pf"],
                "%1 riskle 100→": s["eq"], "maxDD%": s["dd"]}
         for lab, a, z in PERIODS:
             sp = stats(df[(df["t_entry"] >= pd.Timestamp(a, tz="UTC")) & (df["t_entry"] < pd.Timestamp(z, tz="UTC"))])
             row[f"{lab} n"], row[f"{lab} ort.R"] = sp["n"], sp["avgR"]
+        for lev in (1, 2, 5):
+            fin, dd, _ = portfolio(df, lev)
+            row[f"{lev}x 100→"], row[f"{lev}x maxDD%"] = fin, dd
+            ly = df[df["t_entry"] >= pd.Timestamp(PERIODS[-1][1], tz="UTC")]
+            row[f"{lev}x SON YIL 100→"] = portfolio(ly, lev)[0]
         rows.append(row)
         df.to_csv(os.path.join(args.out, f"islemler_{len(rows):02d}.csv"), index=False)
     out = pd.DataFrame(rows)
     out.to_csv(os.path.join(args.out, "sonuclar.csv"), index=False, float_format="%.4g")
-    txt = ["15dk KIRILIM → RETEST → DEVAM (LONG) — kullanıcının kuralları, "
+    tfname = {"15min": "15dk", "1h": "SAATLİK", "4h": "4 SAATLİK"}[args.tf]
+    txt = [f"{tfname} KIRILIM → RETEST → DEVAM (LONG) — kullanıcının kuralları, "
            f"{len(args.coins.split(','))} coin, {args.start} → {args.end}" + ("  [SENTETİK]" if args.synthetic else ""),
            "Ücret: giriş piyasa %0.08+kayma %0.02, TP limit %0.06, stop/süre piyasa %0.08+kayma %0.02. "
            "Madde 8 (derinlik) tarihsel veri olmadığı için test edilemedi.",
            "ort. net R = ücretler düşülmüş işlem başı sonuç (1R = stop mesafesi). '%1 riskle 100→' eşzamanlılık sınırı "
            "olmadan, işlem başı %1 riskle bileşik.", "",
-           out.round(3).to_string(index=False), "",
+           out[[c_ for c_ in out.columns if "x " not in c_]].round(3).to_string(index=False), "",
+           "SABİT KALDIRAÇ PORTFÖYÜ (en fazla 3 pozisyon, her biri bakiyenin 1/3'ü teminat × kaldıraç):",
+           out[["varyant"] + [c_ for c_ in out.columns if "x " in c_]].round(1).to_string(index=False), "",
            "OKUMA: ort. net R her dönemde > 0 (özellikle SON 1 YIL) ve komşu ayarlarda tutarlıysa strateji adaydır.",
            "KONTROL satırları ilgili şartın katkısını gösterir: şart kaldırılınca sonuç kötüleşmiyorsa o şart gereksizdir."]
     text = "\n".join(txt)

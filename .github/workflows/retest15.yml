@@ -22,9 +22,9 @@ jobs:
         with:
           path: research/momentum/data
           key: binance-vision-1m-37coin-v1
-      - run: python research_15m_retest.py
+      - run: python research_15m_retest.py --tf 1h
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: retest15-results
-          path: research/momentum/results/retest15/summary.txt
+          name: retest1h-results
+          path: research/momentum/results/retest_1h/summary.txt
